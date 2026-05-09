@@ -5,14 +5,13 @@ on:
     branches: [main]
     tags:
       - "v*"
-  workflow_dispatch:  # 允许手动触发
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: windows-latest
     permissions:
       contents: write
-      actions: read
 
     steps:
       - name: 检出代码
@@ -27,12 +26,14 @@ jobs:
         run: pip install pdfplumber pdf2image Pillow pytesseract pyinstaller
 
       - name: 打包为 EXE
-        run: pyinstaller --onefile --windowed --name "发票识别工具" invoice_app.py
+        run: |
+          pyinstaller --onefile --windowed --name "InvoiceRenamer" invoice_app.py
+          Move-Item -Path dist\InvoiceRenamer.exe -Destination 发票识别工具.exe
 
       - name: 发布到 Release
         uses: softprops/action-gh-release@v2
         with:
-          files: dist\发票识别工具.exe
+          files: 发票识别工具.exe
           tag_name: ${{ github.ref_name }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
