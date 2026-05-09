@@ -1,0 +1,31 @@
+name: Build Windows EXE
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:  # 允许手动触发
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 安装依赖
+        run: pip install pdfplumber pdf2image Pillow pytesseract pyinstaller
+
+      - name: 打包为 EXE
+        run: pyinstaller --onefile --windowed --name "发票识别工具" invoice_app.py
+
+      - name: 上传 EXE
+        uses: actions/upload-artifact@v4
+        with:
+          name: 发票识别工具
+          path: dist\发票识别工具.exe
