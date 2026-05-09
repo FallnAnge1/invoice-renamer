@@ -2,12 +2,17 @@ name: Build Windows EXE
 
 on:
   push:
-    branches: [main, master]
+    branches: [main]
+    tags:
+      - "v*"
   workflow_dispatch:  # 允许手动触发
 
 jobs:
   build:
     runs-on: windows-latest
+    permissions:
+      contents: write
+      actions: read
 
     steps:
       - name: 检出代码
@@ -24,8 +29,10 @@ jobs:
       - name: 打包为 EXE
         run: pyinstaller --onefile --windowed --name "发票识别工具" invoice_app.py
 
-      - name: 上传 EXE
-        uses: actions/upload-artifact@v4
+      - name: 发布到 Release
+        uses: softprops/action-gh-release@v2
         with:
-          name: 发票识别工具
-          path: dist\发票识别工具.exe
+          files: dist\发票识别工具.exe
+          tag_name: ${{ github.ref_name }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
