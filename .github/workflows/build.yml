@@ -26,14 +26,13 @@ jobs:
         run: pip install pdfplumber pdf2image Pillow pytesseract pyinstaller
 
       - name: 打包为 EXE
-        run: |
-          pyinstaller --onefile --windowed --name "InvoiceRenamer" invoice_app.py
-          Move-Item -Path dist\InvoiceRenamer.exe -Destination 发票识别工具.exe
+        run: pyinstaller --onefile --windowed --name "InvoiceRenamer" invoice_app.py
 
       - name: 发布到 Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: 发票识别工具.exe
-          tag_name: ${{ github.ref_name }}
+        shell: pwsh
+        run: |
+          gh release create $env:GITHUB_REF_NAME dist\InvoiceRenamer.exe `
+            --title "发票识别工具 $env:GITHUB_REF_NAME" `
+            --notes "下载 InvoiceRenamer.exe 即可使用。"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
