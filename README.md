@@ -1,16 +1,8 @@
 # 发票识别与重命名工具
 
-支持命令行和 Windows 图形界面两种使用方式。
+Windows 图形界面程序，用于识别 PDF 发票中的购买方名称和金额并批量重命名。
 
-## 命令行用法
-
-```bash
-python3 rename_invoices.py invoice.pdf           # 处理单文件
-python3 rename_invoices.py --dry-run invoice.pdf # 预览模式
-python3 rename_invoices.py ~/Desktop/invoices/   # 批量处理
-```
-
-## Windows 图形界面
+## 使用方法
 
 ```bash
 python invoice_app.py
@@ -18,10 +10,13 @@ python invoice_app.py
 
 功能：
 - 添加 PDF 文件或导入整个文件夹
+- **添加压缩包（.zip/.rar/.7z），自动解压到桌面并导入 PDF**
 - 预览识别结果（购买方名称 + 金额）
 - 双击表格单元格可手动修正
 - 一键批量重命名
 - 右键删除不需要的文件
+
+> 支持 RAR 需安装：`pip install rarfile`；支持 7Z 需安装：`pip install py7zr`。ZIP 无需额外依赖。
 
 ### 打包为独立 .exe
 

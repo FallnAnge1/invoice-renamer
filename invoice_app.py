@@ -6,26 +6,106 @@
 
 from __future__ import annotations
 
+import datetime
+import logging
 import os
 import re
 import sys
 import threading
 import tkinter as tk
+import zipfile
+from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
-# 导入核心识别函数（兼容 PyInstaller 打包）
-if getattr(sys, "frozen", False):
-    _base = sys._MEIPASS
-else:
-    _base = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, _base)
-from rename_invoices import (
-    extract_text_from_pdf,
-    extract_text_via_ocr,
-    find_buyer_name,
-    find_amount,
-    sanitize_filename,
-)
+logging.basicConfig(level=logging.INFO, format="%(message)s")
+logger = logging.getLogger(__name__)
+
+
+# ======================================================================
+# PDF 文本提取与发票信息识别
+# ======================================================================
+
+def extract_text_from_pdf(pdf_path: str) -> str:
+    """用 pdfplumber 提取 PDF 文本，按页拼接返回。"""
+    import pdfplumber
+
+    full_text = []
+    with pdfplumber.open(pdf_path) as pdf:
+        for page in pdf.pages:
+            text = page.extract_text()
+            if text:
+                full_text.append(text)
+    return "\n".join(full_text)
+
+
+def extract_text_via_ocr(pdf_path: str) -> str:
+    """将 PDF 转为图片后用 OCR 识别文本（扫描件备选方案）。
+    需要: brew install tesseract tesseract-lang
+    """
+    from pdf2image import convert_from_path
+    import pytesseract
+
+    try:
+        pytesseract.get_tesseract_version()
+    except pytesseract.TesseractNotFoundError:
+        raise RuntimeError(
+            "tesseract 未安装。安装方法:\n"
+            "  brew install tesseract tesseract-lang"
+        )
+
+    images = convert_from_path(pdf_path, dpi=300)
+    full_text = []
+    for img in images:
+        text = pytesseract.image_to_string(img, lang="chi_sim+eng")
+        full_text.append(text)
+    return "\n".join(full_text)
+
+
+def find_buyer_name(text: str) -> str | None:
+    """从发票文本中提取购买方名称。"""
+    patterns = [
+        r"购买方名称[：:]\s*(.+?)(?:\n|$)",
+        r"购\s+名称[：:]\s*(.+?)\s+销",
+        r"买\s+名称[：:]\s*(\S+?)\s+售",
+        r"纳税人名称[：:]\s*([^\n]{4,40})",
+        r"购.{0,50}?名称[：:]\s*([^\n]{2,40})",
+    ]
+
+    for pattern in patterns:
+        match = re.search(pattern, text, re.DOTALL)
+        if match:
+            name = match.group(1).strip()
+            if name and len(name) >= 2 and not any(
+                keyword in name
+                for keyword in ["地址", "电话", "开户", "账号", "密码", "填写", "售", "销"]
+            ):
+                return name
+    return None
+
+
+def find_amount(text: str) -> str | None:
+    """从发票文本中提取价税合计金额。"""
+    patterns = [
+        r"价税合计.*?[¥￥]\s*([\d,]+\.\d{2})",
+        r"小写.*?[¥￥]\s*([\d,]+\.\d{2})",
+        r"合计.*?[¥￥]\s*([\d,]+\.\d{2})",
+        r"[¥￥]\s*([\d,]+\.\d{2})",
+    ]
+
+    for pattern in patterns:
+        match = re.search(pattern, text)
+        if match:
+            amount = match.group(1).replace(",", "")
+            return amount
+    return None
+
+
+def sanitize_filename(name: str) -> str:
+    """清理文件名中的非法字符。"""
+    illegal_chars = r'[<>:"/\\|?*]'
+    name = re.sub(illegal_chars, "", name)
+    name = re.sub(r"\s+", "", name)
+    return name.strip()
 
 
 class InvoiceApp:
@@ -56,6 +136,10 @@ class InvoiceApp:
 
         ttk.Button(
             toolbar, text="添加文件夹", command=self.add_folder
+        ).pack(side=tk.LEFT, padx=(0, 6))
+
+        ttk.Button(
+            toolbar, text="添加压缩包", command=self.add_archive
         ).pack(side=tk.LEFT, padx=(0, 20))
 
         ttk.Separator(toolbar, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=10)
@@ -190,6 +274,80 @@ class InvoiceApp:
                 count += 1
         self._refresh_table()
         self._set_status(f"从文件夹导入了 {count} 个 PDF")
+
+    def add_archive(self):
+        """添加压缩包，自动解压到桌面并导入 PDF。"""
+        paths = filedialog.askopenfilenames(
+            title="选择压缩包",
+            filetypes=[
+                ("压缩文件", "*.zip;*.rar;*.7z"),
+                ("ZIP 文件", "*.zip"),
+                ("RAR 文件", "*.rar"),
+                ("7Z 文件", "*.7z"),
+                ("所有文件", "*.*"),
+            ],
+        )
+        if not paths:
+            return
+
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        desktop = os.path.join(os.path.expanduser("~"), "Desktop")
+        extract_root = os.path.join(desktop, f"发票提取_{timestamp}")
+        os.makedirs(extract_root, exist_ok=True)
+
+        total_pdfs = 0
+        failed = []
+        for archive_path in paths:
+            name = os.path.basename(archive_path)
+            self._set_status(f"正在解压: {name}")
+            # 每个压缩包解压到独立子目录
+            sub_dir = os.path.join(extract_root, os.path.splitext(name)[0])
+            os.makedirs(sub_dir, exist_ok=True)
+            try:
+                count = self._extract_archive(archive_path, sub_dir)
+                total_pdfs += count
+            except Exception as e:
+                failed.append(f"{name}: {e}")
+
+        # 递归导入所有解压出的 PDF
+        imported = 0
+        for pdf_path in sorted(Path(extract_root).rglob("*.pdf")):
+            self._insert_item(str(pdf_path))
+            imported += 1
+
+        self._refresh_table()
+
+        if total_pdfs > 0:
+            self._set_status(f"从压缩包导入了 {imported} 个 PDF，已解压到: {extract_root}")
+        else:
+            self._set_status(f"压缩包中未找到 PDF 文件")
+
+        if failed:
+            msg = "\n".join(failed)
+            messagebox.showwarning("解压问题", f"以下压缩包处理失败：\n\n{msg}")
+
+    def _extract_archive(self, archive_path: str, dest_dir: str) -> int:
+        """解压压缩包到目标目录，返回解压出的 PDF 数量。"""
+        ext = os.path.splitext(archive_path)[1].lower()
+
+        if ext == ".zip":
+            with zipfile.ZipFile(archive_path, "r") as zf:
+                zf.extractall(dest_dir)
+
+        elif ext == ".rar":
+            import rarfile
+            with rarfile.RarFile(archive_path, "r") as rf:
+                rf.extractall(dest_dir)
+
+        elif ext == ".7z":
+            import py7zr
+            with py7zr.SevenZipFile(archive_path, "r") as szf:
+                szf.extractall(dest_dir)
+
+        else:
+            raise ValueError(f"不支持的压缩格式: {ext}")
+
+        return sum(1 for _ in Path(dest_dir).rglob("*.pdf"))
 
     def clear_list(self):
         self.items.clear()
