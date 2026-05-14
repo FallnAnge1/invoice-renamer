@@ -23,7 +23,7 @@ jobs:
           python-version: "3.12"
 
       - name: 安装依赖
-        run: pip install pdfplumber pdf2image Pillow pytesseract pyinstaller
+        run: pip install pdfplumber pdf2image Pillow pytesseract pyinstaller rarfile py7zr
 
       - name: 打包为 EXE
         run: pyinstaller --onefile --windowed --name "InvoiceRenamer" invoice_app.py
@@ -31,8 +31,18 @@ jobs:
       - name: 发布到 Release
         shell: pwsh
         run: |
+          $notes = @"
+          GUI 版本，支持 PDF 发票识别与批量重命名。
+
+          ## 功能
+          - 图形界面，双击表格单元格可手动修正识别结果
+          - 支持添加 PDF 文件、文件夹、ZIP/RAR/7z 压缩包
+          - 自动识别购买方名称和价税合计金额
+          - 重命名为「购买方名称_金额.pdf」格式
+          - 扫描件备选 OCR 方案
+          "@
           gh release create $env:GITHUB_REF_NAME dist\InvoiceRenamer.exe `
             --title "发票识别工具 $env:GITHUB_REF_NAME" `
-            --notes "下载 InvoiceRenamer.exe 即可使用。"
+            --notes $notes
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
