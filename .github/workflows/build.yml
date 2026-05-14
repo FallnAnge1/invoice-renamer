@@ -26,7 +26,7 @@ jobs:
         run: pip install pdfplumber pdf2image Pillow pytesseract pyinstaller rarfile py7zr
 
       - name: 打包为 EXE
-        run: pyinstaller --onefile --windowed --name "InvoiceRenamer" invoice_app.py
+        run: pyinstaller --onefile --windowed --name "发票重命名" invoice_app.py
 
       - name: 发布到 Release
         shell: pwsh
@@ -41,7 +41,7 @@ jobs:
           - 重命名为「购买方名称_金额.pdf」格式
           - 扫描件备选 OCR 方案
           "@
-          gh release create $env:GITHUB_REF_NAME dist\InvoiceRenamer.exe `
+          gh release create $env:GITHUB_REF_NAME dist\发票重命名.exe `
             --title "发票识别工具 $env:GITHUB_REF_NAME" `
             --notes $notes
         env:
