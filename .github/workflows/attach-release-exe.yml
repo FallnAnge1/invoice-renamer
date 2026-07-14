@@ -1,4 +1,4 @@
-name: Attach Windows EXE to Release
+name: Attach Portable Windows Package to Release
 
 on:
   workflow_dispatch:
@@ -28,10 +28,15 @@ jobs:
       - name: Install dependencies
         run: python -m pip install --upgrade pip && python -m pip install -r requirements.txt
 
-      - name: Build executable
-        run: python -m PyInstaller --noconfirm --clean --onefile --windowed --name "发票识别工具" invoice_app.py
+      - name: Prepare bundled OCR engine
+        shell: powershell
+        run: ./scripts/prepare_windows_ocr.ps1
 
-      - name: Attach executable to release
+      - name: Build portable package
+        shell: powershell
+        run: ./scripts/build_windows_release.ps1
+
+      - name: Attach portable package to release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "${{ inputs.release_tag }}" "dist/发票识别工具.exe#发票识别工具.exe" --clobber
+        run: gh release upload "${{ inputs.release_tag }}" "release/发票识别工具-windows.zip" --clobber

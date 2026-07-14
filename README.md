@@ -24,7 +24,7 @@ python invoice_app.py
 1. 在 Windows 上安装 Python 3.9+
 2. 双击运行 `build.bat`
 3. 完成后在 `dist\发票识别工具.exe` 找到可执行文件
-4. 该 .exe 可独立运行，无需安装 Python
+4. 官方 Release 版会提供包含 OCR 引擎的压缩包；解压后双击 `.exe` 即可使用扫描件识别。
 
 ## 重命名规则
 
@@ -36,11 +36,11 @@ python invoice_app.py
 
 ## OCR 支持（扫描件发票）
 
-Windows 需安装并配置以下组件：
+从 GitHub Release 下载的 Windows 压缩包已内置 Tesseract 和中文识别数据，**无需单独安装 Tesseract 或 Poppler**。
 
-- Tesseract：https://github.com/UB-Mannheim/tesseract/wiki
-- Poppler（供 PDF 转图片）：https://github.com/oschwartz10612/poppler-windows/releases/
+如果直接通过 `python invoice_app.py` 运行源码，扫描件识别仍需自行安装 Tesseract：
 
-安装后请将两个程序所在目录加入系统 `PATH`，再重新打开软件。
+- Windows：https://github.com/UB-Mannheim/tesseract/wiki
+- macOS：`brew install tesseract tesseract-lang`
 
-macOS：`brew install tesseract tesseract-lang`
+程序使用内置的 PDFium 渲染扫描件，不再依赖 Poppler。

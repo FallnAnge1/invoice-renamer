@@ -24,12 +24,17 @@ jobs:
       - name: Install dependencies
         run: python -m pip install --upgrade pip && python -m pip install -r requirements.txt
 
-      - name: Build executable
-        run: python -m PyInstaller --noconfirm --clean --onefile --windowed --name "发票识别工具" invoice_app.py
+      - name: Prepare bundled OCR engine
+        shell: powershell
+        run: ./scripts/prepare_windows_ocr.ps1
 
-      - name: Upload executable
+      - name: Build portable package
+        shell: powershell
+        run: ./scripts/build_windows_release.ps1
+
+      - name: Upload portable package
         uses: actions/upload-artifact@v4
         with:
           name: 发票识别工具-windows
-          path: dist/发票识别工具.exe
+          path: release/发票识别工具-windows.zip
           if-no-files-found: error

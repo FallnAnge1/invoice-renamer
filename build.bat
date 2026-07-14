@@ -45,13 +45,22 @@ echo [1/3] 安装依赖...
 "%PYTHON%" -m pip install -r requirements.txt
 
 echo.
-echo [2/3] 打包为 exe（约 2-3 分钟）...
-"%PYTHON%" -m PyInstaller --noconfirm --clean --onefile --windowed --name "发票识别工具" ^
-    invoice_app.py
+echo [2/3] 准备内置 OCR 并打包（约 3-5 分钟）...
+powershell -ExecutionPolicy Bypass -File scripts\prepare_windows_ocr.ps1
+if errorlevel 1 goto :failed
+powershell -ExecutionPolicy Bypass -File scripts\build_windows_release.ps1
+if errorlevel 1 goto :failed
 
 echo.
 echo [3/3] 打包完成！
 echo.
-echo 可执行文件: dist\发票识别工具.exe
+echo 便携版压缩包: release\发票识别工具-windows.zip
 echo.
 pause
+exit /b 0
+
+:failed
+echo.
+echo [错误] 打包失败，请查看上方提示。
+pause
+exit /b 1

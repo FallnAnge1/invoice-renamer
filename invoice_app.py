@@ -45,37 +45,49 @@ def extract_text_from_pdf(pdf_path: str) -> str:
     return "\n".join(full_text)
 
 
+def _runtime_resource_path(*parts: str) -> Path:
+    """返回 PyInstaller 打包资源或源码目录中的资源路径。"""
+    base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
+    return base.joinpath(*parts)
+
+
 def extract_text_via_ocr(pdf_path: str) -> str:
-    """将 PDF 转为图片后用 OCR 识别文本（扫描件备选方案）。
-    需要: brew install tesseract tesseract-lang
-    """
-    from pdf2image import convert_from_path
+    """将扫描 PDF 渲染为图片后，通过内置或系统 Tesseract 识别。"""
+    import pypdfium2 as pdfium
     import pytesseract
+
+    bundled_tesseract = _runtime_resource_path("tesseract", "tesseract.exe")
+    bundled_tessdata = _runtime_resource_path("tesseract", "tessdata")
+    ocr_config = ""
+    if bundled_tesseract.is_file() and bundled_tessdata.is_dir():
+        pytesseract.pytesseract.tesseract_cmd = str(bundled_tesseract)
+        # Tesseract 会解析此参数；保留引号以支持 Windows 路径空格。
+        ocr_config = f'--tessdata-dir "{bundled_tessdata}"'
 
     try:
         pytesseract.get_tesseract_version()
     except pytesseract.TesseractNotFoundError:
         raise RuntimeError(
-            "tesseract 未安装。安装方法:\n"
-            "  brew install tesseract tesseract-lang"
+            "未找到 OCR 引擎。请使用官方发布版；源码直接运行时请安装 Tesseract。"
         )
 
-    try:
-        images = convert_from_path(
-            pdf_path, dpi=250, first_page=1, last_page=MAX_OCR_PAGES,
-            fmt="jpeg", thread_count=2,
-        )
-    except Exception as exc:
-        if "poppler" in str(exc).lower():
-            raise RuntimeError(
-                "扫描件识别还需要安装 Poppler。Windows 请安装 Poppler 并加入 PATH，"
-                "然后重新打开软件。"
-            ) from exc
-        raise
     full_text = []
-    for img in images:
-        text = pytesseract.image_to_string(img, lang="chi_sim+eng")
-        full_text.append(text)
+    document = pdfium.PdfDocument(pdf_path)
+    try:
+        for page_index in range(min(len(document), MAX_OCR_PAGES)):
+            page = document[page_index]
+            bitmap = page.render(scale=2.5)
+            image = bitmap.to_pil()
+            try:
+                full_text.append(pytesseract.image_to_string(
+                    image, lang="chi_sim+eng", config=ocr_config,
+                ))
+            finally:
+                image.close()
+                bitmap.close()
+                page.close()
+    finally:
+        document.close()
     return "\n".join(full_text)
 
 
