@@ -1,0 +1,37 @@
+name: Attach Windows EXE to Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing GitHub Release tag to receive the executable
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-attach:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: python -m pip install --upgrade pip && python -m pip install -r requirements.txt
+
+      - name: Build executable
+        run: python -m PyInstaller --noconfirm --clean --onefile --windowed --name "发票识别工具" invoice_app.py
+
+      - name: Attach executable to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ inputs.release_tag }}" "dist/发票识别工具.exe#发票识别工具.exe" --clobber
