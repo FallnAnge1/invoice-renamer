@@ -8,7 +8,7 @@ choco install tesseract --yes --no-progress
 
 $tesseractDirectory = Join-Path $env:ProgramFiles "Tesseract-OCR"
 if (-not (Test-Path (Join-Path $tesseractDirectory "tesseract.exe"))) {
-    throw "未找到 Chocolatey 安装的 Tesseract。"
+    throw "Chocolatey did not install Tesseract at the expected location."
 }
 
 Remove-Item -Recurse -Force $OutputDirectory -ErrorAction SilentlyContinue

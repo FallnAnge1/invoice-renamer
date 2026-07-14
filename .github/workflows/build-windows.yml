@@ -25,11 +25,11 @@ jobs:
         run: python -m pip install --upgrade pip && python -m pip install -r requirements.txt
 
       - name: Prepare bundled OCR engine
-        shell: powershell
+        shell: pwsh
         run: ./scripts/prepare_windows_ocr.ps1
 
       - name: Build portable package
-        shell: powershell
+        shell: pwsh
         run: ./scripts/build_windows_release.ps1
 
       - name: Upload portable package
