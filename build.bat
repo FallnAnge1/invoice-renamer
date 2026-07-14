@@ -42,11 +42,11 @@ echo 找到 Python: %PYTHON%
 
 echo.
 echo [1/3] 安装依赖...
-"%PYTHON%" -m pip install pdfplumber pdf2image Pillow pytesseract pyinstaller rarfile py7zr
+"%PYTHON%" -m pip install -r requirements.txt
 
 echo.
 echo [2/3] 打包为 exe（约 2-3 分钟）...
-"%PYTHON%" -m PyInstaller --onefile --windowed --name "发票识别工具" ^
+"%PYTHON%" -m PyInstaller --noconfirm --clean --onefile --windowed --name "发票识别工具" ^
     invoice_app.py
 
 echo.
