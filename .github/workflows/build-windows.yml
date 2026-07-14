@@ -36,5 +36,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: 发票识别工具-windows
-          path: release/发票识别工具-windows.zip
+          path: release/invoice-renamer-windows.zip
           if-no-files-found: error

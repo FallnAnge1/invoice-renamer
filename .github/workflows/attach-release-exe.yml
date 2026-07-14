@@ -39,4 +39,4 @@ jobs:
       - name: Attach portable package to release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "${{ inputs.release_tag }}" "release/发票识别工具-windows.zip" --clobber
+        run: gh release upload "${{ inputs.release_tag }}" "release/invoice-renamer-windows.zip" --clobber

@@ -54,7 +54,7 @@ if errorlevel 1 goto :failed
 echo.
 echo [3/3] 打包完成！
 echo.
-echo 便携版压缩包: release\发票识别工具-windows.zip
+echo 便携版压缩包: release\invoice-renamer-windows.zip
 echo.
 pause
 exit /b 0
