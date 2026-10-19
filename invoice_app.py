@@ -19,6 +19,7 @@ import tkinter as tk
 import zipfile
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
+from ocr_engine import prepare_ocr
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 logger = logging.getLogger(__name__)
@@ -45,31 +46,12 @@ def extract_text_from_pdf(pdf_path: str) -> str:
     return "\n".join(full_text)
 
 
-def _runtime_resource_path(*parts: str) -> Path:
-    """返回 PyInstaller 打包资源或源码目录中的资源路径。"""
-    base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
-    return base.joinpath(*parts)
-
-
 def extract_text_via_ocr(pdf_path: str) -> str:
     """将扫描 PDF 渲染为图片后，通过内置或系统 Tesseract 识别。"""
     import pypdfium2 as pdfium
     import pytesseract
 
-    bundled_tesseract = _runtime_resource_path("tesseract", "tesseract.exe")
-    bundled_tessdata = _runtime_resource_path("tesseract", "tessdata")
-    ocr_config = ""
-    if bundled_tesseract.is_file() and bundled_tessdata.is_dir():
-        pytesseract.pytesseract.tesseract_cmd = str(bundled_tesseract)
-        # Tesseract 会解析此参数；保留引号以支持 Windows 路径空格。
-        ocr_config = f'--tessdata-dir "{bundled_tessdata}"'
-
-    try:
-        pytesseract.get_tesseract_version()
-    except pytesseract.TesseractNotFoundError:
-        raise RuntimeError(
-            "未找到 OCR 引擎。请使用官方发布版；源码直接运行时请安装 Tesseract。"
-        )
+    ocr_config = prepare_ocr()
 
     full_text = []
     document = pdfium.PdfDocument(pdf_path)
@@ -285,9 +267,16 @@ class InvoiceApp:
             conversion_row, text="格式转换（图片 / PDF）", command=self.open_converter
         )
         self.convert_button.pack(side=tk.LEFT)
-        ttk.Label(conversion_row, text="图片转 PDF、PDF 转图片、图片互转、PDF 合并与拆分").pack(
-            side=tk.LEFT, padx=10
+        self.image_ocr_button = ttk.Button(
+            conversion_row, text="图片识别文字", command=self.open_image_ocr
         )
+        self.image_ocr_button.pack(side=tk.LEFT, padx=10)
+
+    def open_image_ocr(self):
+        if self.processing:
+            return
+        from image_ocr_dialog import ImageOCRDialog
+        ImageOCRDialog(self)
 
     def open_converter(self):
         if self.processing:
@@ -601,7 +590,7 @@ class InvoiceApp:
         for button in (
             self.add_files_button, self.add_folder_button, self.add_archive_button,
             self.preview_button, self.rename_button, self.export_button,
-            self.undo_button, self.clear_button, self.convert_button,
+            self.undo_button, self.clear_button, self.convert_button, self.image_ocr_button,
         ):
             button.config(state=state)
 

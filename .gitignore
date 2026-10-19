@@ -6,3 +6,4 @@ release/
 build-assets/
 *.spec
 .venv/
+.test-deps/
