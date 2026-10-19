@@ -19,7 +19,8 @@ jobs:
       - name: Install dependencies
         run: python -m pip install -r requirements.txt
       - name: Run regression tests
-        run: python -m unittest discover -q
+        # Resolve Windows runner TEMP aliases before creating test fixtures.
+        run: python -c "import tempfile, unittest; from pathlib import Path; tempfile.tempdir = str(Path(tempfile.gettempdir()).resolve()); result = unittest.TextTestRunner().run(unittest.defaultTestLoader.discover('.')); raise SystemExit(not result.wasSuccessful())"
       - name: Prepare bundled Chinese and English OCR
         shell: pwsh
         run: ./scripts/prepare_windows_ocr.ps1
