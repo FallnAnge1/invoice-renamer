@@ -967,4 +967,8 @@ def main():
 
 
 if __name__ == "__main__":
+    import sys
+    if len(sys.argv) == 3 and sys.argv[1] == "--self-test":
+        from release_smoke import run_smoke_test
+        raise SystemExit(run_smoke_test(sys.argv[2]))
     main()

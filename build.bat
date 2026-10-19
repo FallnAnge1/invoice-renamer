@@ -43,12 +43,13 @@ echo 找到 Python: %PYTHON%
 echo.
 echo [1/3] 安装依赖...
 "%PYTHON%" -m pip install -r requirements.txt
+if errorlevel 1 goto :failed
 
 echo.
 echo [2/3] 准备内置 OCR 并打包（约 3-5 分钟）...
 powershell -ExecutionPolicy Bypass -File scripts\prepare_windows_ocr.ps1
 if errorlevel 1 goto :failed
-powershell -ExecutionPolicy Bypass -File scripts\build_windows_release.ps1
+powershell -ExecutionPolicy Bypass -File scripts\build_windows_release.ps1 -PythonExecutable "%PYTHON%"
 if errorlevel 1 goto :failed
 
 echo.

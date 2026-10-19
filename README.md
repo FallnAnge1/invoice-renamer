@@ -84,7 +84,7 @@ Word/Excel 与 PDF 的互转不包含在本版功能内。转换后的 PDF 不�
 
 1. 在 Windows 上安装 Python 3.9+
 2. 双击运行 `build.bat`
-3. 完成后在 `dist\发票识别工具.exe` 找到可执行文件
+3. 完成后在 `release/invoice-renamer-windows.zip` 找到便携包；完整解压后运行文件夹中的 `发票识别工具.exe`，保留 `_internal` 文件夹
 4. 官方 Release 版会提供包含 OCR 引擎的压缩包；解压后双击 `.exe` 即可使用扫描件识别。
 
 ## 重命名规则
