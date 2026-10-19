@@ -36,6 +36,10 @@ def apply_theme(root):
                     borderwidth=1, bordercolor=LINE, focusthickness=2, focuscolor="#B4C7FC")
     style.map("TButton", background=[("disabled", "#F1F4F8"), ("active", "#EAF0FF")],
               foreground=[("disabled", "#98A5B7")])
+    style.configure("TMenubutton", background=WHITE, foreground=INK, padding=(10, 8),
+                    borderwidth=1, bordercolor=LINE, relief="flat")
+    style.map("TMenubutton", background=[("disabled", "#F1F4F8"), ("active", "#EAF0FF")],
+              foreground=[("disabled", "#98A5B7")])
     style.configure("Primary.TButton", background=BLUE, foreground=WHITE, bordercolor=BLUE)
     style.configure("Compact.TButton", padding=(8, 8), width=0)
     style.configure("Compact.Primary.TButton", padding=(8, 8), width=0)

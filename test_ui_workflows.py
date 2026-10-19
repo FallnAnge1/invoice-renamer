@@ -265,10 +265,11 @@ class DesktopWorkflowTest(unittest.TestCase):
         dialog.complete("已复制的文字", None)
         dialog.saved_text = "已复制的文字"
         with patch("image_ocr_dialog.extract_text_from_image", side_effect=RuntimeError("引擎问题")):
-            dialog.run()
+            dialog.run_current()
             self.wait_for_worker()
         self.assertFalse(dialog.busy)
-        self.assertEqual(str(dialog.recognize_button["state"]), "normal")
+        self.assertEqual(str(dialog.current_button["state"]), "normal")
+        self.assertEqual(str(dialog.retry_button["state"]), "normal")
         self.assertEqual(dialog.result.get("1.0", "end-1c"), "已复制的文字")
         self.assertIn("引擎问题", dialog.status["text"])
 
