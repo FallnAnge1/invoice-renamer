@@ -15,11 +15,13 @@ import re
 import shutil
 import sys
 import threading
+import tempfile
 import tkinter as tk
 import zipfile
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 from ocr_engine import prepare_ocr
+from ui_theme import apply_theme, FONT
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 logger = logging.getLogger(__name__)
@@ -196,81 +198,89 @@ def _safe_archive_path(dest_dir: str, member_name: str) -> Path:
 class InvoiceApp:
     def __init__(self, root: tk.Tk):
         self.root = root
-        self.root.title("发票识别与重命名工具")
-        self.root.geometry("1120x600")
-        self.root.minsize(700, 400)
+        self.root.title("发票与文档助手")
+        self.root.geometry("1180x820")
+        self.root.minsize(960, 700)
+        apply_theme(root)
 
         # 数据存储：每项为 {path, filename, buyer, date, amount, invoice_no, status}
         self.items: list[dict] = []
         self.rename_history: list[dict] = []
         self.processing = False
+        self._editor = None
+        self._after_id = None
+        self.root.protocol("WM_DELETE_WINDOW", self.close)
         self.ui_events: queue.Queue = queue.Queue()
 
         self._build_toolbar()
         self._build_table()
         self._build_statusbar()
-        self.root.after(50, self._drain_ui_events)
+        self._refresh_table()
+        self._after_id = self.root.after(50, self._drain_ui_events)
 
     # ------------------------------------------------------------------
     # UI 构建
     # ------------------------------------------------------------------
 
     def _build_toolbar(self):
-        toolbar = ttk.Frame(self.root, padding=10)
-        toolbar.pack(fill=tk.X)
+        header = ttk.Frame(self.root, padding=(24, 20, 24, 14))
+        header.pack(fill=tk.X)
+        titles = ttk.Frame(header)
+        titles.pack(side=tk.LEFT)
+        ttk.Label(titles, text="发票与文档助手", style="Title.TLabel").pack(anchor=tk.W)
+        ttk.Label(titles, text="整理发票、转换文件、提取照片文字，在一个地方完成。",
+                  style="Muted.TLabel").pack(anchor=tk.W, pady=(5, 0))
+        ttk.Label(header, text="本机处理 · 无需上传", style="Badge.TLabel").pack(side=tk.RIGHT)
 
-        self.add_files_button = ttk.Button(
-            toolbar, text="添加 PDF 文件", command=self.add_files
-        )
-        self.add_files_button.pack(side=tk.LEFT, padx=(0, 6))
-
-        self.add_folder_button = ttk.Button(
-            toolbar, text="添加文件夹", command=self.add_folder
-        )
-        self.add_folder_button.pack(side=tk.LEFT, padx=(0, 6))
-
-        self.add_archive_button = ttk.Button(
-            toolbar, text="添加压缩包", command=self.add_archive
-        )
-        self.add_archive_button.pack(side=tk.LEFT, padx=(0, 20))
-
-        ttk.Separator(toolbar, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=10)
-
-        self.preview_button = ttk.Button(
-            toolbar, text="预览识别结果", command=self.start_preview
-        )
-        self.preview_button.pack(side=tk.LEFT, padx=(10, 6))
-
-        self.rename_button = ttk.Button(
-            toolbar, text="执行重命名", command=self.start_rename
-        )
-        self.rename_button.pack(side=tk.LEFT, padx=(0, 6))
-
-        self.export_button = ttk.Button(
-            toolbar, text="导出结果", command=self.export_results
-        )
-        self.export_button.pack(side=tk.LEFT, padx=(0, 6))
-
-        self.undo_button = ttk.Button(
-            toolbar, text="撤销上次重命名", command=self.undo_last_rename
-        )
-        self.undo_button.pack(side=tk.LEFT, padx=(0, 6))
-
-        self.clear_button = ttk.Button(
-            toolbar, text="清空列表", command=self.clear_list
-        )
-        self.clear_button.pack(side=tk.RIGHT)
-
-        conversion_row = ttk.Frame(self.root, padding=(10, 0, 10, 8))
-        conversion_row.pack(fill=tk.X)
-        self.convert_button = ttk.Button(
-            conversion_row, text="格式转换（图片 / PDF）", command=self.open_converter
-        )
+        tools = ttk.Frame(self.root, padding=(24, 0, 24, 14))
+        tools.pack(fill=tk.X)
+        self.convert_button = ttk.Button(tools, text="格式转换  →", command=self.open_converter)
         self.convert_button.pack(side=tk.LEFT)
-        self.image_ocr_button = ttk.Button(
-            conversion_row, text="图片识别文字", command=self.open_image_ocr
-        )
+        self.image_ocr_button = ttk.Button(tools, text="图片识别文字  →", command=self.open_image_ocr)
         self.image_ocr_button.pack(side=tk.LEFT, padx=10)
+        ttk.Label(tools, text="图片 / PDF 互转、合并拆分与中英文提取", style="Muted.TLabel").pack(side=tk.LEFT, padx=6)
+
+        stats = ttk.Frame(self.root, padding=(24, 0, 24, 16))
+        self.stats_frame = stats
+        stats.pack(fill=tk.X)
+        self.stat_values = []
+        for index, label in enumerate(("全部文件", "待识别", "可重命名", "需复核")):
+            stats.columnconfigure(index, weight=1, uniform="stats")
+            card = ttk.Frame(stats, style="Card.TFrame", padding=(18, 12))
+            card.grid(row=0, column=index, sticky="ew", padx=(0 if index == 0 else 10, 0))
+            ttk.Label(card, text=label, style="CardMuted.TLabel").pack(anchor=tk.W)
+            value = ttk.Label(card, text="0", style="Stat.TLabel")
+            value.pack(anchor=tk.W, pady=(2, 0))
+            self.stat_values.append(value)
+
+        toolbar = ttk.Frame(self.root, padding=(24, 0, 24, 14))
+        self.import_toolbar = toolbar
+        toolbar.pack(fill=tk.X)
+        self.add_files_button = ttk.Button(toolbar, text="01  添加 PDF", command=self.add_files, style="Compact.TButton")
+        self.add_files_button.pack(side=tk.LEFT, padx=(0, 6))
+        self.add_folder_button = ttk.Button(toolbar, text="文件夹", command=self.add_folder, style="Compact.TButton")
+        self.add_folder_button.pack(side=tk.LEFT, padx=(0, 6))
+        self.add_archive_button = ttk.Button(toolbar, text="压缩包", command=self.add_archive, style="Compact.TButton")
+        self.add_archive_button.pack(side=tk.LEFT, padx=(0, 16))
+        self.preview_button = ttk.Button(toolbar, text="02  识别校对", command=self.start_preview, style="Compact.TButton")
+        self.preview_button.pack(side=tk.LEFT, padx=(0, 6))
+        self.rename_button = ttk.Button(toolbar, text="03  重命名", command=self.start_rename, style="Compact.Primary.TButton")
+        self.rename_button.pack(side=tk.LEFT)
+        self.clear_button = ttk.Button(toolbar, text="清空列表", command=self.clear_list, style="Compact.TButton")
+        self.clear_button.pack(side=tk.RIGHT)
+        self.export_button = ttk.Button(toolbar, text="导出记录", command=self.export_results, style="Compact.TButton")
+        self.export_button.pack(side=tk.RIGHT, padx=6)
+        self.undo_button = ttk.Button(toolbar, text="撤销重命名", command=self.undo_last_rename, style="Compact.TButton")
+        self.undo_button.pack(side=tk.RIGHT)
+        self.root.bind("<Configure>", self._responsive_layout)
+
+    def _responsive_layout(self, event):
+        if event.widget is not self.root:
+            return
+        if event.height < 780 and self.stats_frame.winfo_manager():
+            self.stats_frame.pack_forget()
+        elif event.height >= 780 and not self.stats_frame.winfo_manager():
+            self.stats_frame.pack(fill=tk.X, before=self.import_toolbar)
 
     def open_image_ocr(self):
         if self.processing:
@@ -285,53 +295,90 @@ class InvoiceApp:
         ConverterDialog(self)
 
     def _build_table(self):
-        """发票列表表格，支持双击编辑。"""
-        frame = ttk.Frame(self.root, padding=(10, 0))
+        frame = ttk.Frame(self.root, padding=(24, 0, 24, 0))
+        self.table_frame = frame
         frame.pack(fill=tk.BOTH, expand=True)
-
+        frame.columnconfigure(0, weight=1)
+        frame.rowconfigure(1, weight=1)
+        caption = ttk.Frame(frame)
+        caption.grid(row=0, column=0, sticky="ew", pady=(0, 8))
+        ttk.Label(caption, text="发票列表", font=(FONT, 11, "bold")).pack(side=tk.LEFT)
+        ttk.Label(caption, text="双击字段修改 · 选中查看命名预览 · 右键管理文件", style="Muted.TLabel").pack(side=tk.RIGHT)
         columns = ("filename", "buyer", "date", "amount", "invoice_no", "status")
-        self.tree = ttk.Treeview(
-            frame,
-            columns=columns,
-            show="headings",
-            selectmode="browse",
-        )
-
-        self.tree.heading("filename", text="文件名")
-        self.tree.heading("buyer", text="购买方名称")
-        self.tree.heading("date", text="开票日期")
-        self.tree.heading("amount", text="金额")
-        self.tree.heading("invoice_no", text="发票号")
-        self.tree.heading("status", text="状态")
-
-        self.tree.column("filename", width=260, minwidth=150)
-        self.tree.column("buyer", width=240, minwidth=120)
-        self.tree.column("date", width=100, minwidth=80, anchor=tk.CENTER)
-        self.tree.column("amount", width=120, minwidth=80, anchor=tk.CENTER)
-        self.tree.column("invoice_no", width=120, minwidth=100, anchor=tk.CENTER)
-        self.tree.column("status", width=110, minwidth=80, anchor=tk.CENTER)
-
+        self.tree = ttk.Treeview(frame, columns=columns, show="headings", selectmode="extended")
+        for name, title, width, minimum in (
+            ("filename", "当前文件名", 255, 160), ("buyer", "购买方名称", 235, 150),
+            ("date", "开票日期", 105, 90), ("amount", "价税合计", 100, 85),
+            ("invoice_no", "发票号码", 185, 170), ("status", "处理状态", 115, 95),
+        ):
+            self.tree.heading(name, text=title)
+            self.tree.column(name, width=width, minwidth=minimum, anchor=tk.W if name in ("filename", "buyer") else tk.CENTER)
         scrollbar = ttk.Scrollbar(frame, orient=tk.VERTICAL, command=self.tree.yview)
-        self.tree.configure(yscrollcommand=scrollbar.set)
-
-        self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-
-        # 双击编辑
+        horizontal = ttk.Scrollbar(frame, orient=tk.HORIZONTAL, command=self.tree.xview)
+        self.tree.configure(yscrollcommand=scrollbar.set, xscrollcommand=horizontal.set)
+        self.tree.grid(row=1, column=0, sticky="nsew")
+        scrollbar.grid(row=1, column=1, sticky="ns")
+        horizontal.grid(row=2, column=0, sticky="ew")
+        self.empty_label = ttk.Label(self.tree, text="还没有发票文件\n从上方添加 PDF、文件夹或压缩包开始。",
+                                     anchor=tk.CENTER, justify=tk.CENTER, style="CardMuted.TLabel")
         self.tree.bind("<Double-1>", self._on_double_click)
-        # 右键删除
+        self.tree.bind("<<TreeviewSelect>>", self._show_selection)
+        self.tree.bind("<Delete>", lambda _event: self.remove_selected())
         self.tree.bind("<Button-2>" if sys.platform == "darwin" else "<Button-3>", self._on_right_click)
 
     def _build_statusbar(self):
-        """底部状态栏：进度条 + 状态文字。"""
-        bottom = ttk.Frame(self.root, padding=(10, 6))
-        bottom.pack(fill=tk.X)
-
+        bottom = ttk.Frame(self.root, padding=(24, 10, 24, 14))
+        bottom.pack(side=tk.BOTTOM, fill=tk.X)
         self.progress = ttk.Progressbar(bottom, mode="determinate")
-        self.progress.pack(fill=tk.X, pady=(0, 4))
-
-        self.status_label = ttk.Label(bottom, text="就绪")
+        self.progress.pack(fill=tk.X, pady=(0, 8))
+        self.status_label = ttk.Label(bottom, text="就绪 · 先导入文件，再识别和校对。", style="Muted.TLabel", wraplength=900)
         self.status_label.pack(anchor=tk.W)
+        detail = ttk.Frame(self.root, style="Card.TFrame", padding=(18, 12))
+        detail.pack(side=tk.BOTTOM, fill=tk.X, padx=24, pady=(10, 0))
+        ttk.Label(detail, text="命名预览与处理说明", style="Heading.TLabel").pack(anchor=tk.W)
+        self.detail_label = ttk.Label(detail, text="选择一份发票，查看完整路径、命名预览和问题说明。",
+                                      style="CardMuted.TLabel", wraplength=880, justify=tk.LEFT)
+        self.detail_label.pack(anchor=tk.W, pady=(6, 0))
+        detail.bind("<Configure>", lambda event: self.detail_label.config(wraplength=max(300, event.width - 36)))
+        self.table_frame.pack_forget()
+        self.table_frame.pack(fill=tk.BOTH, expand=True)
+
+    def close(self):
+        if self.processing:
+            messagebox.showinfo("任务进行中", "请等待当前任务结束后关闭，避免中断文件处理。", parent=self.root)
+            return
+        if self._after_id:
+            self.root.after_cancel(self._after_id)
+        self.root.destroy()
+
+    def _sync_actions(self):
+        ready = not self.processing
+        has_files = bool(self.items)
+        states = {
+            self.preview_button: ready and any(it["status"] in ("待处理", "失败") for it in self.items),
+            self.rename_button: ready and any(it["status"] == "成功" and it["buyer"] and it["amount"] for it in self.items),
+            self.export_button: ready and has_files,
+            self.clear_button: ready and has_files,
+            self.undo_button: ready and bool(self.rename_history),
+        }
+        for button, enabled in states.items():
+            button.config(state=tk.NORMAL if enabled else tk.DISABLED)
+
+    def _show_selection(self, _event=None):
+        selected = self.tree.selection()
+        if not selected:
+            self.detail_label.config(text="选择一份发票，查看完整路径、命名预览和问题说明。")
+            return
+        index = int(selected[0])
+        if index >= len(self.items):
+            return
+        item = self.items[index]
+        name = (build_filename(item["buyer"], item["amount"], item["date"], item["invoice_no"])
+                if item["buyer"] and item["amount"] else "待识别或补齐购买方名称、金额")
+        text = f"目标文件名：{name}\n当前位置：{item['path']}"
+        if item.get("error"):
+            text += f"\n需处理：{item['error']}"
+        self.detail_label.config(text=text)
 
     # ------------------------------------------------------------------
     # 表格数据操作
@@ -340,8 +387,10 @@ class InvoiceApp:
     def _insert_item(self, filepath: str):
         """添加一个 PDF 文件到列表（去重）。"""
         filepath = os.path.abspath(filepath)
-        if any(it["path"] == filepath for it in self.items):
-            return
+        if not Path(filepath).is_file() or Path(filepath).suffix.lower() != ".pdf":
+            return False
+        if any(os.path.normcase(it["path"]) == os.path.normcase(filepath) for it in self.items):
+            return False
         self.items.append({
             "path": filepath,
             "filename": os.path.basename(filepath),
@@ -352,21 +401,23 @@ class InvoiceApp:
             "status": "待处理",
             "error": "",
         })
+        return True
 
     def _refresh_table(self):
         """用 self.items 刷新 Treeview。"""
+        selected_paths = {self.items[int(row)]["path"] for row in self.tree.selection()
+                          if int(row) < len(self.items)}
+        view = self.tree.yview()
         for row in self.tree.get_children():
             self.tree.delete(row)
 
         for i, item in enumerate(self.items):
-            tags = ()
-            status_text = item["status"]
-            if item["status"] == "失败" and item.get("error"):
-                status_text = item["error"][:30]
-            elif item["status"] in ("成功", "已重命名"):
-                tags = ("success",)
+            tags = ("even" if i % 2 == 0 else "odd",)
+            status_text = {"成功": "可重命名", "失败": "需复核", "待处理": "待识别"}.get(item["status"], item["status"])
+            if item["status"] in ("成功", "已重命名"):
+                tags += ("success",)
             elif item["status"] == "失败":
-                tags = ("fail",)
+                tags += ("fail",)
             self.tree.insert(
                 "",
                 tk.END,
@@ -382,8 +433,25 @@ class InvoiceApp:
                 tags=tags,
             )
 
-        self.tree.tag_configure("success", foreground="green")
-        self.tree.tag_configure("fail", foreground="red")
+            if item["path"] in selected_paths:
+                self.tree.selection_add(str(i))
+        self.tree.tag_configure("even", background="#FFFFFF")
+        self.tree.tag_configure("odd", background="#F7F9FD")
+        self.tree.tag_configure("success", foreground="#147D59")
+        self.tree.tag_configure("fail", foreground="#B35313")
+        if view:
+            self.tree.yview_moveto(view[0])
+        if self.items:
+            self.empty_label.place_forget()
+        else:
+            self.empty_label.place(relx=.5, rely=.5, anchor=tk.CENTER)
+        counts = [len(self.items), sum(it["status"] == "待处理" for it in self.items),
+                  sum(it["status"] == "成功" for it in self.items),
+                  sum(it["status"] == "失败" for it in self.items)]
+        for label, count in zip(self.stat_values, counts):
+            label.config(text=str(count))
+        self._sync_actions()
+        self._show_selection()
 
     # ------------------------------------------------------------------
     # 事件处理
@@ -392,24 +460,32 @@ class InvoiceApp:
     def add_files(self):
         paths = filedialog.askopenfilenames(
             title="选择 PDF 发票文件",
-            filetypes=[("PDF 文件", "*.pdf"), ("所有文件", "*.*")],
+            filetypes=[("PDF 文件", "*.pdf")],
         )
-        for p in paths:
-            self._insert_item(p)
+        if not paths:
+            return
+        count = sum(self._insert_item(p) for p in paths)
         self._refresh_table()
-        self._set_status(f"已添加 {len(paths)} 个文件")
+        self._set_status(f"新增 {count} 个 PDF，跳过 {len(paths) - count} 个重复或无效文件。")
 
     def add_folder(self):
         folder = filedialog.askdirectory(title="选择包含 PDF 发票的文件夹")
         if not folder:
             return
-        count = 0
-        for pdf_path in sorted(Path(folder).rglob("*")):
-            if pdf_path.is_file() and pdf_path.suffix.lower() == ".pdf":
-                self._insert_item(str(pdf_path))
-                count += 1
-        self._refresh_table()
-        self._set_status(f"从文件夹（含子文件夹）导入了 {count} 个 PDF")
+        self._start_worker(lambda: self._run_folder(folder))
+
+    def _run_folder(self, folder):
+        try:
+            count = 0
+            for pdf_path in sorted(Path(folder).rglob("*")):
+                if pdf_path.is_file() and pdf_path.suffix.lower() == ".pdf":
+                    count += int(self._insert_item(str(pdf_path)))
+            self._set_status(f"从文件夹（含子文件夹）新增 {count} 个 PDF，重复文件已跳过。")
+        except OSError as error:
+            self._set_status(f"导入文件夹失败：{error}")
+        finally:
+            self._post_ui(self._refresh_table)
+            self._finish_worker()
 
     def add_archive(self):
         """添加压缩包，自动解压到桌面并导入 PDF。"""
@@ -426,40 +502,36 @@ class InvoiceApp:
         if not paths:
             return
 
-        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        desktop = os.path.join(os.path.expanduser("~"), "Desktop")
-        extract_root = os.path.join(desktop, f"发票提取_{timestamp}")
-        os.makedirs(extract_root, exist_ok=True)
+        self._start_worker(lambda: self._run_archives(paths))
 
-        failed = []
-        for archive_path in paths:
-            name = os.path.basename(archive_path)
-            self._set_status(f"正在解压: {name}")
-            # 每个压缩包解压到独立子目录
-            sub_dir = os.path.join(extract_root, os.path.splitext(name)[0])
-            os.makedirs(sub_dir, exist_ok=True)
-            try:
-                self._extract_archive(archive_path, sub_dir)
-            except Exception as e:
-                failed.append(f"{name}: {e}")
-
-        # 递归导入所有解压出的 PDF
-        imported = 0
-        for pdf_path in sorted(Path(extract_root).rglob("*")):
-            if pdf_path.is_file() and pdf_path.suffix.lower() == ".pdf":
-                self._insert_item(str(pdf_path))
-                imported += 1
-
-        self._refresh_table()
-
-        if imported > 0:
-            self._set_status(f"从压缩包导入了 {imported} 个 PDF，已解压到: {extract_root}")
-        else:
-            self._set_status(f"压缩包中未找到 PDF 文件")
-
-        if failed:
-            msg = "\n".join(failed)
-            messagebox.showwarning("解压问题", f"以下压缩包处理失败：\n\n{msg}")
+    def _run_archives(self, paths):
+        try:
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            desktop = Path.home() / "Desktop"
+            desktop.mkdir(parents=True, exist_ok=True)
+            extract_root = Path(tempfile.mkdtemp(prefix=f"发票提取_{timestamp}_", dir=desktop))
+            failed = []
+            self._set_progress(0, len(paths))
+            for index, archive_path in enumerate(paths):
+                name = Path(archive_path).name
+                self._set_status(f"正在解压：{name} ({index + 1}/{len(paths)})")
+                sub_dir = extract_root / f"{index + 1:02d}_{Path(name).stem}"
+                sub_dir.mkdir(parents=True)
+                try:
+                    self._extract_archive(archive_path, str(sub_dir))
+                except Exception as error:
+                    failed.append(f"{name}: {error}")
+                self._set_progress(index + 1)
+            imported = sum(int(self._insert_item(str(path))) for path in sorted(extract_root.rglob("*"))
+                           if path.is_file() and path.suffix.lower() == ".pdf")
+            self._set_status(f"从压缩包新增 {imported} 个 PDF，输出位置：{extract_root}")
+            if failed:
+                self._post_ui(messagebox.showwarning, "解压问题", "以下压缩包未完整解压：\n\n" + "\n".join(failed))
+        except OSError as error:
+            self._set_status(f"导入压缩包失败：{error}")
+        finally:
+            self._post_ui(self._refresh_table)
+            self._finish_worker()
 
     def _extract_archive(self, archive_path: str, dest_dir: str) -> int:
         """解压压缩包到目标目录，返回解压出的 PDF 数量。"""
@@ -504,6 +576,11 @@ class InvoiceApp:
     def clear_list(self):
         if self.processing:
             return
+        if self.items and not messagebox.askyesno("清空列表", "仅移除列表记录，原文件会保留。是否清空？", parent=self.root):
+            return
+        if self._editor is not None:
+            editor, self._editor = self._editor, None
+            editor.destroy()
         self.items.clear()
         self._refresh_table()
         self.progress["value"] = 0
@@ -511,6 +588,8 @@ class InvoiceApp:
 
     def _on_double_click(self, event):
         """双击单元格进入编辑模式。"""
+        if self.processing or self._editor is not None:
+            return
         region = self.tree.identify_region(event.x, event.y)
         if region != "cell":
             return
@@ -531,30 +610,61 @@ class InvoiceApp:
         current = self.items[int(item_id)].get(col_name, "")
 
         entry = ttk.Entry(self.tree)
+        self._editor = entry
         entry.place(x=bbox[0], y=bbox[1], width=bbox[2], height=bbox[3])
         entry.insert(0, current)
         entry.select_range(0, tk.END)
         entry.focus_set()
 
         def save_edit(*_):
+            if self._editor is not entry:
+                return
+            self._editor = None
             new_val = entry.get().strip()
-            self.items[int(item_id)][col_name] = new_val
             entry.destroy()
-            self._refresh_table()
+            self._apply_edit(int(item_id), col_name, new_val)
+
+        def cancel_edit(_event=None):
+            if self._editor is entry:
+                self._editor = None
+                entry.destroy()
 
         entry.bind("<Return>", save_edit)
         entry.bind("<FocusOut>", save_edit)
-        entry.bind("<Escape>", lambda e: entry.destroy())
+        entry.bind("<Escape>", cancel_edit)
+
+    def _apply_edit(self, index, field, value):
+        item = self.items[index]
+        item[field] = value
+        item["status"] = "成功" if item["buyer"] and item["amount"] else "失败"
+        item["error"] = "" if item["status"] == "成功" else "请补齐购买方名称和金额"
+        self._refresh_table()
 
     def _on_right_click(self, event):
-        """右键删除行。"""
+        """右键菜单仅从列表移除，不删除磁盘文件。"""
         if self.processing:
             return
         item_id = self.tree.identify_row(event.y)
         if item_id:
-            self.tree.delete(item_id)
-            del self.items[int(item_id)]
-            self._refresh_table()
+            if item_id not in self.tree.selection():
+                self.tree.selection_set(item_id)
+            menu = tk.Menu(self.root, tearoff=False)
+            menu.add_command(label="从列表移除所选（保留原文件）", command=self.remove_selected)
+            try:
+                menu.tk_popup(event.x_root, event.y_root)
+            finally:
+                menu.grab_release()
+
+    def remove_selected(self):
+        if self.processing or self._editor is not None:
+            return
+        selected = sorted((int(row) for row in self.tree.selection()), reverse=True)
+        self.tree.selection_remove(self.tree.selection())
+        for index in selected:
+            del self.items[index]
+        self._refresh_table()
+        if selected:
+            self._set_status(f"已从列表移除 {len(selected)} 个文件，原文件保留。")
 
     # ------------------------------------------------------------------
     # 识别与重命名（线程执行）
@@ -572,7 +682,7 @@ class InvoiceApp:
                 callback(*args, **kwargs)
         except queue.Empty:
             pass
-        self.root.after(50, self._drain_ui_events)
+        self._after_id = self.root.after(50, self._drain_ui_events)
 
     def _set_status(self, text: str):
         self._post_ui(self.status_label.config, text=text)
@@ -593,8 +703,11 @@ class InvoiceApp:
             self.undo_button, self.clear_button, self.convert_button, self.image_ocr_button,
         ):
             button.config(state=state)
+        self._sync_actions()
 
     def _start_worker(self, target):
+        if self._editor is not None:
+            self._editor.event_generate("<FocusOut>")
         if self.processing:
             messagebox.showinfo("提示", "当前任务尚未完成，请稍候。")
             return False
@@ -608,6 +721,8 @@ class InvoiceApp:
     def _recognize_one(self, item: dict) -> bool:
         """识别单个 PDF，结果写回 item。"""
         item["error"] = ""
+        for field in ("buyer", "amount", "date", "invoice_no"):
+            item[field] = ""
         try:
             text = extract_text_from_pdf(item["path"])
 
@@ -653,26 +768,29 @@ class InvoiceApp:
             return False
 
     def start_preview(self):
+        if self.processing:
+            return
         if not self.items:
             messagebox.showinfo("提示", "请先添加 PDF 文件。")
             return
         self._start_worker(self._run_preview)
 
     def _run_preview(self):
-        total = len(self.items)
+        pending = [item for item in self.items if item["status"] in ("待处理", "失败")]
+        total = len(pending)
         self._set_progress(0, total)
         try:
-            for i, item in enumerate(self.items):
+            for i, item in enumerate(pending):
                 self._set_status(f"正在识别: {item['filename']} ({i + 1}/{total})")
                 self._recognize_one(item)
                 self._set_progress(i + 1)
                 self._post_ui(self._refresh_table)
 
-            ok = sum(1 for it in self.items if it["status"] == "成功")
+            ok = sum(1 for it in pending if it["status"] == "成功")
             self._set_status(f"预览完成：{ok}/{total} 识别成功")
 
             # 汇总错误，用户也可通过“导出结果”留存全部明细。
-            errors = [(it["filename"], it.get("error", "")) for it in self.items if it["status"] == "失败"]
+            errors = [(it["filename"], it.get("error", "")) for it in pending if it["status"] == "失败"]
             if errors:
                 msg = "\n".join(f"  {f}: {e}" for f, e in errors)
                 self._post_ui(messagebox.showwarning, "识别问题", f"以下文件未能识别：\n\n{msg}")
@@ -680,6 +798,8 @@ class InvoiceApp:
             self._finish_worker()
 
     def start_rename(self):
+        if self.processing:
+            return
         if not self.items:
             messagebox.showinfo("提示", "请先添加 PDF 文件。")
             return
@@ -706,6 +826,7 @@ class InvoiceApp:
         total = len(pending)
         self._set_progress(0, total)
         renamed = 0
+        unchanged = 0
         history = []
 
         try:
@@ -715,9 +836,14 @@ class InvoiceApp:
                 new_name = build_filename(
                     item["buyer"], item["amount"], item["date"], item["invoice_no"]
                 )
-                new_path = make_unique_path(old_path, new_name)
-
                 try:
+                    new_path = make_unique_path(old_path, new_name)
+                    if os.path.normcase(os.path.abspath(old_path)) == os.path.normcase(os.path.abspath(new_path)):
+                        item["status"] = "已重命名"
+                        unchanged += 1
+                        self._set_progress(idx + 1)
+                        self._post_ui(self._refresh_table)
+                        continue
                     os.rename(old_path, new_path)
                     item["path"] = new_path
                     item["filename"] = os.path.basename(new_path)
@@ -725,7 +851,7 @@ class InvoiceApp:
                     item["error"] = ""
                     history.append({"old_path": old_path, "new_path": new_path})
                     renamed += 1
-                except OSError as exc:
+                except (OSError, RuntimeError) as exc:
                     item["status"] = "失败"
                     item["error"] = f"重命名失败: {exc}"
 
@@ -734,10 +860,10 @@ class InvoiceApp:
 
             if history:
                 self.rename_history = history
-            self._set_status(f"重命名完成：{renamed}/{total} 个文件")
+            self._set_status(f"重命名完成：修改 {renamed} 个，名称已符合规则 {unchanged} 个，共 {total} 个")
             self._post_ui(
                 messagebox.showinfo, "完成",
-                f"成功重命名 {renamed}/{total} 个文件。\n可在本次打开软件期间撤销上次重命名。",
+                f"成功修改 {renamed} 个，另有 {unchanged} 个文件名称已符合规则。\n可在本次打开软件期间撤销上次重命名。",
             )
         finally:
             self._finish_worker()
