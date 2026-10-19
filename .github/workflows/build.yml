@@ -1,48 +1,39 @@
-name: Build Windows EXE
+name: Build Windows Portable Package
 
 on:
   push:
     branches: [main]
-    tags:
-      - "v*"
   workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   build:
     runs-on: windows-latest
-    permissions:
-      contents: write
-
     steps:
-      - name: 检出代码
-        uses: actions/checkout@v4
-
-      - name: 安装 Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-
-      - name: 安装依赖
-        run: pip install pdfplumber pdf2image Pillow pytesseract pyinstaller rarfile py7zr
-
-      - name: 打包为 EXE
-        run: pyinstaller --onefile --windowed --name "发票重命名" invoice_app.py
-
-      - name: 发布到 Release
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Run regression tests
+        run: python -m unittest discover -q
+      - name: Prepare bundled Chinese and English OCR
+        shell: pwsh
+        run: ./scripts/prepare_windows_ocr.ps1
+      - name: Build portable package
+        shell: pwsh
+        run: ./scripts/build_windows_release.ps1
+      - name: Verify packaged executable
         shell: pwsh
         run: |
-          $notes = @"
-          GUI 版本，支持 PDF 发票识别与批量重命名。
-
-          ## 功能
-          - 图形界面，双击表格单元格可手动修正识别结果
-          - 支持添加 PDF 文件、文件夹、ZIP/RAR/7z 压缩包
-          - 自动识别购买方名称和价税合计金额
-          - 重命名为「购买方名称_金额.pdf」格式
-          - 扫描件备选 OCR 方案
-          "@
-          gh release create $env:GITHUB_REF_NAME dist\发票重命名.exe `
-            --title "发票识别工具 $env:GITHUB_REF_NAME" `
-            --notes $notes
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          $app = Start-Process -FilePath "release/发票识别工具/发票识别工具.exe" -ArgumentList @("--self-test", "build-assets/smoke-test") -WindowStyle Hidden -PassThru -Wait
+          if ($app.ExitCode -ne 0) { throw "Packaged smoke test failed" }
+          Get-Content "build-assets/smoke-test/report.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: invoice-renamer-windows
+          path: release/invoice-renamer-windows.zip*
+          if-no-files-found: error
