@@ -24,12 +24,20 @@ def apply_theme(root):
     style.configure(".", font=(FONT, 10), background=BG, foreground=INK)
     style.configure("TFrame", background=BG)
     style.configure("Card.TFrame", background=WHITE)
+    style.configure("Panel.TFrame", background=WHITE, borderwidth=1, relief="solid", bordercolor=LINE)
+    style.configure("Stage.TFrame", background="#F5F7FB")
+    style.configure("Stage.TLabel", background="#F5F7FB", foreground=MUTED, font=(FONT, 10))
     style.configure("TLabel", background=BG, foreground=INK)
     style.configure("Card.TLabel", background=WHITE)
     style.configure("Title.TLabel", font=(FONT, 22, "bold"), foreground=INK)
     style.configure("Heading.TLabel", font=(FONT, 12, "bold"), background=WHITE)
     style.configure("Muted.TLabel", foreground=MUTED)
     style.configure("CardMuted.TLabel", foreground=MUTED, background=WHITE)
+    style.configure("Small.TLabel", font=(FONT, 9), foreground=MUTED)
+    style.configure("CardSmall.TLabel", font=(FONT, 9), foreground=MUTED, background=WHITE)
+    style.configure("GreenBadge.TLabel", font=(FONT, 9), foreground="#13765B", background="#E6F5ED", padding=(8, 4))
+    style.configure("OrangeBadge.TLabel", font=(FONT, 9), foreground="#A65016", background="#FFF0DF", padding=(8, 4))
+    style.configure("NeutralBadge.TLabel", font=(FONT, 9), foreground=MUTED, background="#EEF2F7", padding=(8, 4))
     style.configure("Stat.TLabel", font=(FONT, 23, "bold"), background=WHITE, foreground=BLUE)
     style.configure("Badge.TLabel", foreground=BLUE, background="#E7EEFF", padding=(12, 7))
     style.configure("TButton", background=WHITE, foreground=INK, padding=(13, 9),
@@ -54,12 +62,24 @@ def apply_theme(root):
     style.configure("Treeview.Heading", background="#EAF0F8", foreground=MUTED,
                     font=(FONT, 10, "bold"), padding=(10, 12), relief="flat")
     style.map("Treeview", background=[("selected", "#DCE7FF")], foreground=[("selected", "#153FAD")])
+    style.configure("Queue.Treeview", rowheight=38, borderwidth=0, relief="flat", bordercolor=WHITE,
+                    lightcolor=WHITE, darkcolor=WHITE)
+    style.configure("Link.TButton", padding=(2, 1), width=0, background=WHITE, foreground=BLUE, borderwidth=0)
+    style.map("Link.TButton", background=[("active", "#EAF0FF"), ("!active", WHITE)],
+              foreground=[("disabled", "#98A5B7"), ("!disabled", BLUE)])
+    style.configure("Queue.Treeview.Heading", background=WHITE, padding=(8, 9), font=(FONT, 9), foreground=MUTED)
     style.configure("TProgressbar", background=BLUE, troughcolor="#E4EBF5", borderwidth=0, thickness=6)
     style.configure("Horizontal.TProgressbar", background=BLUE, troughcolor="#E4EBF5",
                     bordercolor="#E4EBF5", lightcolor=BLUE, darkcolor=BLUE, borderwidth=0, thickness=6)
     style.configure("TSeparator", background=LINE)
     style.configure("TScrollbar", background="#D2DCEB", troughcolor=BG, borderwidth=0,
                     arrowcolor=MUTED)
+    for orient, sticky in (("Vertical", "ns"), ("Horizontal", "ew")):
+        name = f"Slim.{orient}.TScrollbar"
+        style.layout(name, [(f"{orient}.Scrollbar.trough", {"sticky": sticky, "children": [
+            (f"{orient}.Scrollbar.thumb", {"expand": "1", "sticky": "nsew"})]})])
+        style.configure(name, background="#CCD6E5", troughcolor="#F5F7FB", borderwidth=0,
+                        bordercolor="#F5F7FB", lightcolor="#CCD6E5", darkcolor="#CCD6E5", width=8)
 
 
 def heading(parent, title, subtitle):

@@ -4,6 +4,18 @@ from pathlib import Path
 from format_converter import _write_output
 
 
+def describe_ocr_error(error):
+    """将常见读取错误转成可操作的界面提示，避免显示内部临时路径。"""
+    message = str(error).strip()
+    if "cannot identify image file" in message.lower():
+        return "无法读取图片，文件可能损坏或格式不受支持，请检查原文件。"
+    if isinstance(error, FileNotFoundError):
+        return "找不到照片，文件可能已移动或删除，请重新添加。"
+    if "timeout" in message.lower() or "timed out" in message.lower():
+        return "识别超时，请检查照片清晰度，或缩小过大的照片后重试。"
+    return message[:240] or "识别未完成，请检查照片后重试。"
+
+
 def new_record(path):
     return {"path": str(Path(path).resolve()), "text": "", "saved_text": "",
             "status": "待识别", "error": "", "language": ""}
