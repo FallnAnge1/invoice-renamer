@@ -11,6 +11,8 @@ from PIL import Image
 from invoice_app import InvoiceApp
 from converter_dialog import ConverterDialog
 from image_ocr_dialog import ImageOCRDialog
+from rename_preview import build_rename_plan, RenamePreviewDialog
+from invoice_app import build_filename
 
 
 class DesktopWorkflowTest(unittest.TestCase):
@@ -76,7 +78,8 @@ class DesktopWorkflowTest(unittest.TestCase):
         self.assertEqual(self.app.items[0]["error"], "")
         self.assertEqual(str(self.app.rename_button["state"]), "normal")
         self.app._apply_edit(0, "amount", "")
-        self.assertEqual(str(self.app.rename_button["state"]), "disabled")
+        self.assertEqual(self.app.items[0]["status"], "失败")
+        self.assertEqual(str(self.app.rename_button["state"]), "normal")  # 仍可预览跳过原因
 
     def test_processing_blocks_actions_and_restores_them(self):
         self.app._insert_item(str(self.pdf))
@@ -86,7 +89,7 @@ class DesktopWorkflowTest(unittest.TestCase):
         self.assertEqual(str(self.app.convert_button["state"]), "disabled")
         self.app._set_processing(False)
         self.assertEqual(str(self.app.preview_button["state"]), "normal")
-        self.assertEqual(str(self.app.rename_button["state"]), "disabled")
+        self.assertEqual(str(self.app.rename_button["state"]), "normal")
 
     def test_real_rename_and_undo_preserve_contents(self):
         self.pdf.write_bytes(b"original invoice contents")
@@ -106,6 +109,73 @@ class DesktopWorkflowTest(unittest.TestCase):
         self.assertTrue(self.pdf.exists())
         self.assertEqual(self.app.rename_history, [])
         self.assertEqual(str(self.app.undo_button["state"]), "disabled")
+
+    def test_invalid_edit_is_marked_and_correction_restores_readiness(self):
+        self.app._insert_item(str(self.pdf))
+        self.app.items[0].update(buyer="示例公司", status="成功")
+        self.app._apply_edit(0, "amount", "88.OO")
+        self.assertEqual(self.app.items[0]["status"], "失败")
+        self.assertIn("[异常]", self.app.tree.item("0", "values")[3])
+        self.app._apply_edit(0, "amount", "88.5")
+        self.assertEqual(self.app.items[0]["amount"], "88.50")
+        self.assertEqual(self.app.items[0]["status"], "成功")
+
+    def test_ocr_invalid_optional_date_is_blocked_instead_of_omitted(self):
+        self.app._insert_item(str(self.pdf))
+        text = "购买方名称：示例公司\n价税合计 ￥88.50\n开票日期：20260230\n发票号码：12345678O"
+        with patch("invoice_app.extract_text_from_pdf", return_value=text):
+            self.assertFalse(self.app._recognize_one(self.app.items[0]))
+        self.assertIn("date", self.app.items[0]["validation_errors"])
+        self.assertIn("invoice_no", self.app.items[0]["validation_errors"])
+
+    def test_preview_cancel_keeps_files_and_confirm_uses_shown_target(self):
+        self.app._insert_item(str(self.pdf))
+        self.app.items[0].update(buyer="示例公司", amount="88.50", status="成功")
+        plan = build_rename_plan(self.app.items, build_filename)
+        dialog = RenamePreviewDialog(self.app, plan)
+        self.assertTrue(self.pdf.exists())
+        self.assertFalse(Path(plan[0]["target"]).exists())
+        dialog.window.destroy()
+        self.assertTrue(self.pdf.exists())
+        dialog = RenamePreviewDialog(self.app, plan)
+        with patch("invoice_app.messagebox.showinfo"):
+            dialog.confirm_button.invoke()
+            self.wait_for_worker()
+        self.assertEqual(self.app.items[0]["path"], plan[0]["target"])
+        self.assertFalse(self.pdf.exists())
+
+    def test_all_invalid_preview_has_no_execution_button(self):
+        self.app._insert_item(str(self.pdf))
+        dialog = RenamePreviewDialog(self.app, build_rename_plan(self.app.items, build_filename))
+        self.assertEqual(str(dialog.confirm_button["state"]), "disabled")
+        dialog.confirm()
+        self.assertFalse(self.app.processing)
+
+    def test_new_conflict_after_preview_is_not_renamed_or_overwritten(self):
+        self.app._insert_item(str(self.pdf))
+        self.app.items[0].update(buyer="示例公司", amount="88.50", status="成功")
+        plan = build_rename_plan(self.app.items, build_filename)
+        target = Path(plan[0]["target"])
+        target.write_bytes(b"newly occupied target")
+        with patch("invoice_app.messagebox.showinfo"):
+            self.app._start_worker(lambda: self.app._run_rename(plan))
+            self.wait_for_worker()
+        self.assertTrue(self.pdf.exists())
+        self.assertEqual(target.read_bytes(), b"newly occupied target")
+        self.assertIn("重新预览", self.app.items[0]["error"])
+        self.assertEqual(self.app.rename_history, [])
+
+    def test_source_change_after_preview_requires_review(self):
+        self.app._insert_item(str(self.pdf))
+        self.app.items[0].update(buyer="示例公司", amount="88.50", status="成功")
+        plan = build_rename_plan(self.app.items, build_filename)
+        self.pdf.write_bytes(b"changed source contents")
+        with patch("invoice_app.messagebox.showinfo"):
+            self.app._start_worker(lambda: self.app._run_rename(plan))
+            self.wait_for_worker()
+        self.assertTrue(self.pdf.exists())
+        self.assertFalse(Path(plan[0]["target"]).exists())
+        self.assertIn("源文件已改变", self.app.items[0]["error"])
 
     def test_folder_import_runs_in_background_and_skips_duplicates(self):
         with patch("invoice_app.filedialog.askdirectory", return_value=str(self.folder)):

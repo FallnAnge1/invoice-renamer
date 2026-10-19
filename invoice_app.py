@@ -22,6 +22,8 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 from ocr_engine import prepare_ocr
 from ui_theme import apply_theme, FONT
+from invoice_validation import validate_invoice, update_validation
+from rename_preview import build_rename_plan, RenamePreviewDialog, file_signature, path_key, rename_no_replace
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 logger = logging.getLogger(__name__)
@@ -100,25 +102,26 @@ def find_buyer_name(text: str) -> str | None:
 def find_amount(text: str) -> str | None:
     """从发票文本中提取价税合计金额。"""
     patterns = [
-        r"价税合计.*?[¥￥]\s*([\d,]+\.\d{2})",
-        r"小写.*?[¥￥]\s*([\d,]+\.\d{2})",
-        r"合计.*?[¥￥]\s*([\d,]+\.\d{2})",
-        r"[¥￥]\s*([\d,]+\.\d{2})",
+        r"价税合计.*?[¥￥]\s*([-+]?[0-9A-Za-z][0-9A-Za-z,.]*)",
+        r"小写.*?[¥￥]\s*([-+]?[0-9A-Za-z][0-9A-Za-z,.]*)",
+        r"合计.*?[¥￥]\s*([-+]?[0-9A-Za-z][0-9A-Za-z,.]*)",
+        r"[¥￥]\s*([-+]?[0-9A-Za-z][0-9A-Za-z,.]*)",
     ]
 
     for pattern in patterns:
         match = re.search(pattern, text)
         if match:
-            amount = match.group(1).replace(",", "")
-            return amount
+            raw = match.group(1)
+            values, errors, _ = validate_invoice({"buyer": "校验", "amount": raw})
+            return raw if "amount" in errors else values["amount"]
     return None
 
 
 def find_invoice_date(text: str) -> str | None:
     """提取开票日期，统一返回 YYYYMMDD，便于按日期排序。"""
     patterns = [
-        r"开票日期[：:]?\s*(\d{4})\s*[年./-]\s*(\d{1,2})\s*[月./-]\s*(\d{1,2})",
-        r"开票日期[：:]?\s*(\d{4})(\d{2})(\d{2})",
+        r"开票日期[：:]?\s*(\d{4})\s*[年./-]\s*(\d{1,2})\s*[月./-]\s*(\d{1,2})(?![0-9A-Za-z])",
+        r"开票日期[：:]?\s*(\d{4})(\d{2})(\d{2})(?![0-9A-Za-z])",
     ]
     for pattern in patterns:
         match = re.search(pattern, text)
@@ -135,14 +138,15 @@ def find_invoice_date(text: str) -> str | None:
 def find_invoice_number(text: str) -> str | None:
     """提取发票号码；仅保留数字，避免误把校验码写入文件名。"""
     patterns = [
-        r"发票号码[：:]?\s*([0-9\s]{8,24})",
-        r"发票号[：:]?\s*([0-9\s]{8,24})",
+        r"发票号码[：:]?[ \t]*([^\r\n]+)",
+        r"发票号[：:]?[ \t]*([^\r\n]+)",
     ]
     for pattern in patterns:
         match = re.search(pattern, text)
         if match:
-            number = re.sub(r"\s+", "", match.group(1))
-            if 8 <= len(number) <= 20:
+            raw = re.split(r"\s+(?=[\u4e00-\u9fff])", match.group(1).strip(), maxsplit=1)[0]
+            number = re.sub(r"\s+", "", raw)
+            if re.fullmatch(r"[0-9]{8,20}", number):
                 return number
     return None
 
@@ -264,7 +268,7 @@ class InvoiceApp:
         self.add_archive_button.pack(side=tk.LEFT, padx=(0, 16))
         self.preview_button = ttk.Button(toolbar, text="02  识别校对", command=self.start_preview, style="Compact.TButton")
         self.preview_button.pack(side=tk.LEFT, padx=(0, 6))
-        self.rename_button = ttk.Button(toolbar, text="03  重命名", command=self.start_rename, style="Compact.Primary.TButton")
+        self.rename_button = ttk.Button(toolbar, text="03  命名预览", command=self.start_rename, style="Compact.Primary.TButton")
         self.rename_button.pack(side=tk.LEFT)
         self.clear_button = ttk.Button(toolbar, text="清空列表", command=self.clear_list, style="Compact.TButton")
         self.clear_button.pack(side=tk.RIGHT)
@@ -356,7 +360,7 @@ class InvoiceApp:
         has_files = bool(self.items)
         states = {
             self.preview_button: ready and any(it["status"] in ("待处理", "失败") for it in self.items),
-            self.rename_button: ready and any(it["status"] == "成功" and it["buyer"] and it["amount"] for it in self.items),
+            self.rename_button: ready and has_files,
             self.export_button: ready and has_files,
             self.clear_button: ready and has_files,
             self.undo_button: ready and bool(self.rename_history),
@@ -373,11 +377,17 @@ class InvoiceApp:
         if index >= len(self.items):
             return
         item = self.items[index]
-        name = (build_filename(item["buyer"], item["amount"], item["date"], item["invoice_no"])
-                if item["buyer"] and item["amount"] else "待识别或补齐购买方名称、金额")
+        values, errors, warnings = validate_invoice(item)
+        name = (build_filename(values["buyer"], values["amount"], values["date"], values["invoice_no"])
+                if not errors else "先修正字段，再预览目标文件名")
         text = f"目标文件名：{name}\n当前位置：{item['path']}"
-        if item.get("error"):
-            text += f"\n需处理：{item['error']}"
+        messages = list(errors.values()) if item["status"] != "待处理" else []
+        if item.get("error") and item["error"] not in "；".join(messages):
+            messages.insert(0, item["error"])
+        if messages:
+            text += "\n需处理：" + "；".join(messages)
+        elif warnings and item["status"] != "待处理":
+            text += "\n命名提醒：" + "；".join(warnings.values())
         self.detail_label.config(text=text)
 
     # ------------------------------------------------------------------
@@ -413,7 +423,9 @@ class InvoiceApp:
 
         for i, item in enumerate(self.items):
             tags = ("even" if i % 2 == 0 else "odd",)
-            status_text = {"成功": "可重命名", "失败": "需复核", "待处理": "待识别"}.get(item["status"], item["status"])
+            status_text = {"成功": "可预览命名", "失败": "需复核", "待处理": "待识别"}.get(item["status"], item["status"])
+            _, validation_errors, _ = validate_invoice(item)
+            mark = lambda field: item[field] + (" [异常]" if field in validation_errors and item[field] else "")
             if item["status"] in ("成功", "已重命名"):
                 tags += ("success",)
             elif item["status"] == "失败":
@@ -424,10 +436,10 @@ class InvoiceApp:
                 iid=str(i),
                 values=(
                     item["filename"],
-                    item["buyer"],
-                    item["date"],
-                    item["amount"],
-                    item["invoice_no"],
+                    mark("buyer"),
+                    mark("date"),
+                    mark("amount"),
+                    mark("invoice_no"),
                     status_text,
                 ),
                 tags=tags,
@@ -636,8 +648,7 @@ class InvoiceApp:
     def _apply_edit(self, index, field, value):
         item = self.items[index]
         item[field] = value
-        item["status"] = "成功" if item["buyer"] and item["amount"] else "失败"
-        item["error"] = "" if item["status"] == "成功" else "请补齐购买方名称和金额"
+        update_validation(item)
         self._refresh_table()
 
     def _on_right_click(self, event):
@@ -739,13 +750,13 @@ class InvoiceApp:
             amount = find_amount(text)
             invoice_date = find_invoice_date(text)
             invoice_no = find_invoice_number(text)
-
-            if not buyer and not amount:
-                item["error"] = "未匹配到购买方和金额"
-            elif not buyer:
-                item["error"] = "未匹配到购买方名称"
-            elif not amount:
-                item["error"] = "未匹配到金额"
+            # 有标签但格式无法识别时保留原值，交由校验提示，避免把异常当成可选字段缺失。
+            if not invoice_date:
+                raw = re.search(r"开票日期[：:]?[ \t]*([^\r\n]{1,40})", text)
+                invoice_date = raw.group(1).strip() if raw else None
+            if not invoice_no:
+                raw = re.search(r"(?:发票号码|发票号)[：:]?[ \t]*([^\r\n]{1,40})", text)
+                invoice_no = raw.group(1).strip() if raw else None
 
             if buyer:
                 item["buyer"] = buyer
@@ -756,8 +767,7 @@ class InvoiceApp:
             if invoice_no:
                 item["invoice_no"] = invoice_no
 
-            item["status"] = "成功" if (buyer and amount) else "失败"
-            return item["status"] == "成功"
+            return update_validation(item)
         except ImportError as e:
             item["status"] = "失败"
             item["error"] = f"缺少依赖库: {e}"
@@ -800,71 +810,51 @@ class InvoiceApp:
     def start_rename(self):
         if self.processing:
             return
+        if self._editor is not None:
+            self._editor.event_generate("<FocusOut>")
         if not self.items:
             messagebox.showinfo("提示", "请先添加 PDF 文件。")
             return
+        plan = build_rename_plan(self.items, build_filename)
+        RenamePreviewDialog(self, plan)
 
-        pending = [it for it in self.items if it["status"] == "成功"]
-        if not pending:
-            messagebox.showinfo("提示", "没有可重命名的文件。请先预览识别结果。")
-            return
-
-        ok = messagebox.askokcancel(
-            "确认重命名",
-            f"将重命名 {len(pending)} 个文件，是否继续？\n\n"
-            "文件名格式：开票日期_购买方名称_金额_发票号后8位.pdf\n"
-            "（未识别到日期或发票号时会自动省略）\n"
-            "重名自动加序号后缀。"
-        )
-        if not ok:
-            return
-
-        self._start_worker(self._run_rename)
-
-    def _run_rename(self):
-        pending = [(i, it) for i, it in enumerate(self.items) if it["status"] == "成功"]
+    def _run_rename(self, plan=None):
+        # 界面始终传入用户确认过的计划；无参数路径供内部流程和回归测试使用。
+        if plan is None:
+            plan = build_rename_plan(self.items, build_filename)
+        pending = [entry for entry in plan if entry["action"] == "rename"]
         total = len(pending)
+        skipped = len(plan) - total
         self._set_progress(0, total)
-        renamed = 0
-        unchanged = 0
-        history = []
-
+        renamed, failed, history = 0, [], []
         try:
-            for idx, (_, item) in enumerate(pending):
-                self._set_status(f"正在重命名: {item['filename']} ({idx + 1}/{total})")
-                old_path = item["path"]
-                new_name = build_filename(
-                    item["buyer"], item["amount"], item["date"], item["invoice_no"]
-                )
+            for position, entry in enumerate(pending, 1):
+                item = self.items[entry["index"]]
+                old_path, new_path = entry["source"], entry["target"]
+                self._set_status(f"正在重命名：{Path(old_path).name} ({position}/{total})")
                 try:
-                    new_path = make_unique_path(old_path, new_name)
-                    if os.path.normcase(os.path.abspath(old_path)) == os.path.normcase(os.path.abspath(new_path)):
-                        item["status"] = "已重命名"
-                        unchanged += 1
-                        self._set_progress(idx + 1)
-                        self._post_ui(self._refresh_table)
-                        continue
-                    os.rename(old_path, new_path)
-                    item["path"] = new_path
-                    item["filename"] = os.path.basename(new_path)
-                    item["status"] = "已重命名"
-                    item["error"] = ""
+                    values, errors, _ = validate_invoice(item)
+                    if errors or values != entry["fields"] or path_key(item["path"]) != path_key(old_path):
+                        raise RuntimeError("预览后记录已改变，请重新预览")
+                    if file_signature(old_path) != entry["signature"]:
+                        raise RuntimeError("预览后源文件已改变，请重新核对")
+                    rename_no_replace(old_path, new_path)
+                    item.update(entry["fields"])
+                    item.update(path=new_path, filename=Path(new_path).name, status="已重命名", error="")
                     history.append({"old_path": old_path, "new_path": new_path})
                     renamed += 1
-                except (OSError, RuntimeError) as exc:
+                except (OSError, RuntimeError) as error:
                     item["status"] = "失败"
-                    item["error"] = f"重命名失败: {exc}"
-
-                self._set_progress(idx + 1)
+                    item["error"] = f"重命名未执行：{error}"
+                    failed.append(f"{Path(old_path).name}：{error}")
+                self._set_progress(position)
                 self._post_ui(self._refresh_table)
-
             if history:
                 self.rename_history = history
-            self._set_status(f"重命名完成：修改 {renamed} 个，名称已符合规则 {unchanged} 个，共 {total} 个")
-            self._post_ui(
-                messagebox.showinfo, "完成",
-                f"成功修改 {renamed} 个，另有 {unchanged} 个文件名称已符合规则。\n可在本次打开软件期间撤销上次重命名。",
-            )
+            summary = f"修改 {renamed} 项，跳过 {skipped} 项，执行失败 {len(failed)} 项。"
+            self._set_status("重命名完成：" + summary)
+            self._post_ui(messagebox.showinfo, "重命名完成", summary +
+                ("\n\n" + "\n".join(failed) if failed else "\n可在本次打开软件期间撤销上次修改。"))
         finally:
             self._finish_worker()
 
