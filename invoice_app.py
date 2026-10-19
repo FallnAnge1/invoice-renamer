@@ -279,6 +279,22 @@ class InvoiceApp:
         )
         self.clear_button.pack(side=tk.RIGHT)
 
+        conversion_row = ttk.Frame(self.root, padding=(10, 0, 10, 8))
+        conversion_row.pack(fill=tk.X)
+        self.convert_button = ttk.Button(
+            conversion_row, text="格式转换（图片 / PDF）", command=self.open_converter
+        )
+        self.convert_button.pack(side=tk.LEFT)
+        ttk.Label(conversion_row, text="图片转 PDF、PDF 转图片、图片互转、PDF 合并与拆分").pack(
+            side=tk.LEFT, padx=10
+        )
+
+    def open_converter(self):
+        if self.processing:
+            return
+        from converter_dialog import ConverterDialog
+        ConverterDialog(self)
+
     def _build_table(self):
         """发票列表表格，支持双击编辑。"""
         frame = ttk.Frame(self.root, padding=(10, 0))
@@ -585,7 +601,7 @@ class InvoiceApp:
         for button in (
             self.add_files_button, self.add_folder_button, self.add_archive_button,
             self.preview_button, self.rename_button, self.export_button,
-            self.undo_button, self.clear_button,
+            self.undo_button, self.clear_button, self.convert_button,
         ):
             button.config(state=state)
 
