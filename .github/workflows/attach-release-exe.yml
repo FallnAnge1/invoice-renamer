@@ -18,7 +18,7 @@ jobs:
       - name: Checkout source
         uses: actions/checkout@v4
         with:
-          ref: main
+          ref: ${{ inputs.release_tag }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -32,11 +32,21 @@ jobs:
         shell: pwsh
         run: ./scripts/prepare_windows_ocr.ps1
 
+      - name: Run regression tests
+        run: python -m unittest discover -q
+
       - name: Build portable package
         shell: pwsh
         run: ./scripts/build_windows_release.ps1
 
       - name: Attach portable package to release
+        shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "${{ inputs.release_tag }}" "release/invoice-renamer-windows.zip" --clobber
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          $app = Start-Process -FilePath "release/发票识别工具/发票识别工具.exe" -ArgumentList @("--self-test", "build-assets/smoke-test") -WindowStyle Hidden -PassThru -Wait
+          if ($app.ExitCode -ne 0) { throw "Packaged smoke test failed" }
+          Get-Content "build-assets/smoke-test/report.json"
+          gh release upload "$env:RELEASE_TAG" "release/invoice-renamer-windows.zip" "release/invoice-renamer-windows.zip.sha256"
+          if ($LASTEXITCODE -ne 0) { throw "Release asset upload failed" }
