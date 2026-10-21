@@ -63,7 +63,7 @@ class ConverterDialog:
         self.output_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
         choose = ttk.Button(output, text="更改位置", command=self.choose_output)
         choose.pack(side=tk.LEFT, padx=(8, 0))
-        self.import_pdf = tk.BooleanVar(value=True)
+        self.import_pdf = tk.BooleanVar(value=False)
         self.import_check = ttk.Checkbutton(settings, text="生成 PDF 后加入发票列表，继续识别与重命名", variable=self.import_pdf)
         self.import_check.pack(anchor=tk.W)
 

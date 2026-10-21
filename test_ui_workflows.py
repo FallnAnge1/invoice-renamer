@@ -239,6 +239,7 @@ class DesktopWorkflowTest(unittest.TestCase):
 
     def test_converter_default_output_and_real_conversion_import(self):
         dialog = ConverterDialog(self.app)
+        dialog.import_pdf.set(True)
         with patch("converter_dialog.filedialog.askopenfilenames", return_value=[str(self.photo)]):
             dialog.add_files()
         self.assertEqual(Path(dialog.output.get()), self.folder / "转换结果")
@@ -247,6 +248,17 @@ class DesktopWorkflowTest(unittest.TestCase):
         self.wait_for_worker()
         self.assertEqual(len(self.app.items), 1)
         self.assertTrue(Path(self.app.items[0]["path"]).is_file())
+        self.assertEqual(str(dialog.open_button["state"]), "normal")
+
+    def test_converter_default_does_not_add_generated_pdfs_to_rename_list(self):
+        dialog = ConverterDialog(self.app)
+        self.assertFalse(dialog.import_pdf.get())
+        dialog.add_paths([str(self.photo)])
+        dialog.run()
+        self.wait_for_worker()
+        self.assertEqual(len(dialog.outputs), 1)
+        self.assertTrue(Path(dialog.outputs[0]).is_file())
+        self.assertEqual(self.app.items, [])
         self.assertEqual(str(dialog.open_button["state"]), "normal")
 
     def test_ocr_empty_result_buttons_and_unsaved_protection(self):

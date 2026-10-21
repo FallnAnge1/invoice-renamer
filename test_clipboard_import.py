@@ -85,6 +85,7 @@ class ClipboardWorkflowTest(unittest.TestCase):
 
     def test_pasted_conversion_uses_permanent_output_and_can_import_result(self):
         dialog = ConverterDialog(self.app)
+        dialog.import_pdf.set(True)
         with patch("clipboard_import.ImageGrab.grabclipboard", side_effect=lambda: Image.new("RGB", (80, 40), "white")):
             dialog.paste_clipboard()
         photo = Path(dialog.paths[0])
