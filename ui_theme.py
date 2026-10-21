@@ -30,6 +30,8 @@ def apply_theme(root):
     style.configure("TLabel", background=BG, foreground=INK)
     style.configure("Card.TLabel", background=WHITE)
     style.configure("Title.TLabel", font=(FONT, 22, "bold"), foreground=INK)
+    style.configure("PageTitle.TLabel", font=(FONT, 18, "bold"), foreground=INK)
+    style.configure("TPanedwindow", background=BG)
     style.configure("Heading.TLabel", font=(FONT, 12, "bold"), background=WHITE)
     style.configure("Muted.TLabel", foreground=MUTED)
     style.configure("CardMuted.TLabel", foreground=MUTED, background=WHITE)

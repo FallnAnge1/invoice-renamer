@@ -1,11 +1,13 @@
-"""格式转换窗口，复用主界面的工作线程与消息队列。"""
+"""主窗口内的格式转换页面，复用主界面的工作线程与消息队列。"""
 from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 from tkinter.scrolledtext import ScrolledText
 
 from format_converter import IMAGE_SUFFIXES, MODES, convert_files
-from ui_theme import heading, style_text, open_folder, FONT, INK, LINE
+from clipboard_import import ClipboardImport, is_text_input
+from app_paths import desktop_directory
+from ui_theme import style_text, open_folder, FONT, INK, LINE
 
 
 class ConverterDialog:
@@ -15,32 +17,35 @@ class ConverterDialog:
         self.outputs = []
         self.last_folder = None
         self.busy = False
-        self.window = tk.Toplevel(app.root)
-        self.window.title("格式转换 · 发票与文档助手")
-        self.window.geometry("900x800")
-        self.window.minsize(760, 720)
-        self.window.transient(app.root)
-        self.window.grab_set()
-        self.window.protocol("WM_DELETE_WINDOW", self.close)
-        body = ttk.Frame(self.window, padding=24)
+        self.clipboard_import = ClipboardImport()
+        self.window = ttk.Frame(app.workspace)
+        self.window.bind("<Control-v>", self.paste_shortcut)
+        self.window.bind("<Destroy>", self.cleanup_clipboard, add="+")
+        body = ttk.Frame(self.window, padding=(22, 12))
         body.pack(fill=tk.BOTH, expand=True)
-        heading(body, "格式转换", "图片与 PDF 互转、合并拆分，原文件始终保留。")
-        ttk.Label(body, text="01  选择转换方式", font=(FONT, 11, "bold")).pack(anchor=tk.W)
+        page_heading = ttk.Frame(body)
+        page_heading.pack(fill=tk.X, pady=(0, 12))
+        ttk.Label(page_heading, text="格式转换", style="PageTitle.TLabel").pack(side=tk.LEFT)
+        ttk.Label(page_heading, text="独立转换 · 默认保存到桌面 · 原文件保留", style="Muted.TLabel").pack(side=tk.LEFT, padx=18)
+        mode_row = ttk.Frame(body)
+        mode_row.pack(fill=tk.X, pady=(0, 6))
+        ttk.Label(mode_row, text="转换方式", font=(FONT, 11, "bold")).pack(side=tk.LEFT, padx=(0, 12))
         self.mode = tk.StringVar(value=next(iter(MODES)))
-        self.mode_box = ttk.Combobox(body, textvariable=self.mode, values=list(MODES), state="readonly")
-        self.mode_box.pack(fill=tk.X, pady=(8, 6))
+        self.mode_box = ttk.Combobox(mode_row, textvariable=self.mode, values=list(MODES), state="readonly")
+        self.mode_box.pack(side=tk.LEFT, fill=tk.X, expand=True)
         self.mode_box.bind("<<ComboboxSelected>>", self.change_mode)
         self.mode_hint = ttk.Label(body, style="Muted.TLabel", wraplength=680)
-        self.mode_hint.pack(anchor=tk.W, pady=(0, 12))
+        self.mode_hint.pack(anchor=tk.W, pady=(0, 8))
 
         # 固定底部操作区先布局，让窄窗口也能看到转换结果和按钮。
         footer = ttk.Frame(body)
         footer.pack(side=tk.BOTTOM, fill=tk.X)
-        self.result = ScrolledText(footer, height=3, wrap=tk.WORD, state=tk.DISABLED)
+        self.result = ScrolledText(footer, height=2, wrap=tk.WORD, state=tk.DISABLED)
         style_text(self.result)
+        self.result.configure(font=(FONT, 10), padx=10, pady=6)
         self.result.pack(fill=tk.X, pady=(10, 0))
         self.progress = ttk.Progressbar(footer)
-        self.progress.pack(fill=tk.X, pady=(12, 8))
+        self.progress.pack(fill=tk.X, pady=(8, 6))
         action = ttk.Frame(footer)
         action.pack(fill=tk.X)
         self.open_button = ttk.Button(action, text="打开输出文件夹", command=self.open_output)
@@ -50,16 +55,16 @@ class ConverterDialog:
         self.progress_label = ttk.Label(action, text="等待添加文件", style="Muted.TLabel")
         self.progress_label.pack(side=tk.RIGHT, padx=14)
         settings = ttk.Frame(body)
-        settings.pack(side=tk.BOTTOM, fill=tk.X, pady=(12, 0))
-        ttk.Label(settings, text="03  保存位置", font=(FONT, 11, "bold")).pack(anchor=tk.W)
+        settings.pack(side=tk.BOTTOM, fill=tk.X, pady=(8, 0))
         output = ttk.Frame(settings)
-        output.pack(fill=tk.X, pady=8)
-        self.output = tk.StringVar()
+        output.pack(fill=tk.X, pady=(0, 4))
+        ttk.Label(output, text="保存到", font=(FONT, 11, "bold")).pack(side=tk.LEFT, padx=(0, 12))
+        self.output = tk.StringVar(value=str(desktop_directory()))
         self.output_entry = ttk.Entry(output, textvariable=self.output)
         self.output_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
         choose = ttk.Button(output, text="更改位置", command=self.choose_output)
         choose.pack(side=tk.LEFT, padx=(8, 0))
-        self.import_pdf = tk.BooleanVar(value=True)
+        self.import_pdf = tk.BooleanVar(value=False)
         self.import_check = ttk.Checkbutton(settings, text="生成 PDF 后加入发票列表，继续识别与重命名", variable=self.import_pdf)
         self.import_check.pack(anchor=tk.W)
 
@@ -69,6 +74,8 @@ class ConverterDialog:
         self.count_label.pack(side=tk.LEFT)
         self.add_button = ttk.Button(row, text="添加文件", command=self.add_files)
         self.add_button.pack(side=tk.RIGHT)
+        self.paste_button = ttk.Button(row, text="从剪贴板粘贴", command=self.paste_clipboard)
+        self.paste_button.pack(side=tk.RIGHT, padx=8)
         list_frame = ttk.Frame(body)
         list_frame.pack(fill=tk.BOTH, expand=True)
         self.files = tk.Listbox(list_frame, selectmode=tk.EXTENDED, height=5, exportselection=False,
@@ -89,12 +96,21 @@ class ConverterDialog:
         self.down_button = ttk.Button(manage, text="下移", command=lambda: self.move(1))
         self.down_button.pack(side=tk.LEFT)
         ttk.Label(manage, text="合并按列表从上到下的顺序", style="Muted.TLabel").pack(side=tk.RIGHT)
-        self.controls = [self.add_button, self.remove_button, self.up_button, self.down_button,
+        manage.pack_configure(before=list_frame)
+        self.controls = [self.add_button, self.paste_button, self.remove_button, self.up_button, self.down_button,
                          self.output_entry, choose, self.import_check, self.start]
         self.output.trace_add("write", lambda *_args: self.update_controls())
-        self.show_result("添加文件后即可转换。同名结果自动加序号，无需手动改名。")
+        self.show_result("添加文件或粘贴截图即可转换（列表中按 Ctrl+V）。同名结果自动加序号。")
         self.update_hint()
         self.update_controls()
+        self._bind_page_shortcuts(self.window)
+
+    def _bind_page_shortcuts(self, parent):
+        for widget in parent.winfo_children():
+            tags = widget.bindtags()
+            if str(self.window) not in tags:
+                widget.bindtags((*tags[:-1], str(self.window), tags[-1]))
+            self._bind_page_shortcuts(widget)
 
     def update_hint(self):
         mode = MODES[self.mode.get()]
@@ -154,10 +170,16 @@ class ConverterDialog:
         self.update_controls()
 
     def add_files(self):
+        if self.busy or self.app.processing:
+            return
         images = MODES[self.mode.get()].startswith("image")
         pattern = " ".join("*" + suffix for suffix in sorted(IMAGE_SUFFIXES)) if images else "*.pdf"
         paths = filedialog.askopenfilenames(parent=self.window, title="选择要转换的文件",
                     filetypes=[("图片文件" if images else "PDF 文件", pattern)])
+        self.add_paths(paths)
+
+    def add_paths(self, paths):
+        images = MODES[self.mode.get()].startswith("image")
         added = 0
         allowed = IMAGE_SUFFIXES if images else {".pdf"}
         known = {str(Path(path).resolve()).casefold() for path in self.paths}
@@ -168,10 +190,28 @@ class ConverterDialog:
                 known.add(key)
                 added += 1
         if self.paths and not self.output.get().strip():
-            self.output.set(str(Path(self.paths[0]).parent / "转换结果"))
+            self.output.set(str(desktop_directory()))
         self.refresh()
         if paths:
             self.progress_label.config(text=f"已添加 {added} 个文件")
+
+    def paste_shortcut(self, event):
+        if not is_text_input(event.widget):
+            self.paste_clipboard()
+            return "break"
+
+    def paste_clipboard(self):
+        if self.busy or self.app.processing:
+            return
+        allowed = IMAGE_SUFFIXES if MODES[self.mode.get()].startswith("image") else {".pdf"}
+        try:
+            self.add_paths(self.clipboard_import.read(allowed))
+        except (ValueError, OSError) as error:
+            messagebox.showinfo("无法粘贴", str(error), parent=self.window)
+
+    def cleanup_clipboard(self, event):
+        if event.widget == self.window:
+            self.clipboard_import.cleanup()
 
     def remove(self):
         selected = self.files.curselection()
@@ -195,7 +235,8 @@ class ConverterDialog:
             self.update_controls()
 
     def choose_output(self):
-        folder = filedialog.askdirectory(parent=self.window, title="选择输出文件夹")
+        folder = filedialog.askdirectory(parent=self.window, title="选择输出文件夹",
+                                         initialdir=self.output.get().strip() or str(desktop_directory()))
         if folder:
             self.output.set(folder)
 

@@ -6,7 +6,11 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
+
+concurrency:
+  group: windows-portable-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -38,3 +42,16 @@ jobs:
           name: invoice-renamer-windows
           path: release/invoice-renamer-windows.zip*
           if-no-files-found: error
+      - name: Publish a verified new version
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $version = (python -c "from app_version import VERSION; print(VERSION)").Trim()
+          if ($LASTEXITCODE -ne 0 -or $version -notmatch '^\d+\.\d+\.\d+$') { throw "Invalid version" }
+          $tag = "v$version"
+          gh release view "$tag" *> $null
+          if ($LASTEXITCODE -eq 0) { Write-Host "Release $tag already exists; keeping existing assets."; exit 0 }
+          gh release create "$tag" "release/invoice-renamer-windows.zip" "release/invoice-renamer-windows.zip.sha256" --target "$env:GITHUB_SHA" --title "$tag · 发票与文档助手" --notes-file RELEASE_NOTES.md --latest
+          if ($LASTEXITCODE -ne 0) { throw "Release publication failed" }
