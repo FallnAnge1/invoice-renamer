@@ -72,9 +72,12 @@ class ImageOCRDialog:
 
         footer = ttk.Frame(body, style="Card.TFrame", padding=(14, 10))
         footer.pack(side=tk.BOTTOM, fill=tk.X, pady=(12, 0))
-        self.status = ttk.Label(footer, text="就绪 · 添加照片或文件夹，开始批量识别。",
+        status_row = ttk.Frame(footer, style="Card.TFrame")
+        status_row.pack(fill=tk.X, pady=(0, 8))
+        ttk.Label(status_row, image=app.root.brand_small, style="Card.TLabel").pack(side=tk.LEFT, padx=(0, 8))
+        self.status = ttk.Label(status_row, text="就绪 · 添加照片或文件夹，开始批量识别。",
                                 style="CardSmall.TLabel", wraplength=940)
-        self.status.pack(anchor=tk.W, pady=(0, 8))
+        self.status.pack(side=tk.LEFT)
         self.progress = ttk.Progressbar(footer, mode="determinate")
         self.progress.pack(fill=tk.X)
         content = ttk.Frame(body)

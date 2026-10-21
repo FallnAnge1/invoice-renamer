@@ -55,7 +55,7 @@ if errorlevel 1 goto :failed
 echo.
 echo [3/3] 打包完成！
 echo.
-echo 便携版压缩包: release\invoice-renamer-windows.zip
+echo 单文件程序: release\invoice-renamer-windows.exe
 echo.
 pause
 exit /b 0

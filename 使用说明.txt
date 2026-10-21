@@ -1,6 +1,7 @@
-发票与文档助手 v1.8.0 · Windows 便携版
+发票与文档助手 v1.9.0 · Windows 单文件版
 
-请先完整解压 ZIP，再双击「发票识别工具.exe」。请保留旁边的 _internal 文件夹，不能只复制 EXE。
+下载 invoice-renamer-windows.exe 后直接双击使用，无需解压、安装或保留旁边的依赖文件夹。
+运行时会自动将内置组件展开到系统临时目录，退出后自动清理。第一次启动请稍等片刻。
 无需安装 Python、Tesseract 或 Poppler，已内置中文和英文识别数据。
 三个功能在同一个主窗口切换，保留本次内容，不另开功能窗口。图片放大也在页内查看，点击“返回校对”返回。
 
@@ -16,5 +17,5 @@
 输出文件遇到重名自动增加序号；发票重命名前会显示预览，支持本次会话撤销。
 RAR 解压仍可能需要系统安装的外部解压程序，ZIP 和 7Z 可直接使用。
 
-诊断（可选）：命令行运行「发票识别工具.exe --self-test 输出文件夹」，生成 report.json。
+诊断（可选）：命令行运行「invoice-renamer-windows.exe --self-test 输出文件夹」，生成 report.json。
 项目和更新：https://github.com/FallnAnge1/invoice-renamer/releases

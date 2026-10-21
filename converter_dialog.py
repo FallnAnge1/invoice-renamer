@@ -54,6 +54,7 @@ class ConverterDialog:
         self.start.pack(side=tk.RIGHT)
         self.progress_label = ttk.Label(action, text="等待添加文件", style="Muted.TLabel")
         self.progress_label.pack(side=tk.RIGHT, padx=14)
+        ttk.Label(action, image=app.root.brand_small).pack(side=tk.RIGHT)
         settings = ttk.Frame(body)
         settings.pack(side=tk.BOTTOM, fill=tk.X, pady=(8, 0))
         output = ttk.Frame(settings)
