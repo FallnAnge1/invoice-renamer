@@ -1,4 +1,4 @@
-param([string]$PythonExecutable = "python")
+﻿param([string]$PythonExecutable = "python")
 $ErrorActionPreference = "Stop"
 Set-Location (Split-Path $PSScriptRoot -Parent)
 foreach ($file in @("tesseract.exe", "tessdata/chi_sim.traineddata", "tessdata/eng.traineddata")) {
