@@ -13,6 +13,7 @@ from converter_dialog import ConverterDialog
 from image_ocr_dialog import ImageOCRDialog
 from rename_preview import build_rename_plan, RenamePreviewDialog
 from invoice_app import build_filename
+from app_paths import desktop_directory
 
 
 class DesktopWorkflowTest(unittest.TestCase):
@@ -242,7 +243,8 @@ class DesktopWorkflowTest(unittest.TestCase):
         dialog.import_pdf.set(True)
         with patch("converter_dialog.filedialog.askopenfilenames", return_value=[str(self.photo)]):
             dialog.add_files()
-        self.assertEqual(Path(dialog.output.get()), self.folder / "转换结果")
+        self.assertEqual(Path(dialog.output.get()), desktop_directory())
+        dialog.output.set(str(self.folder / "转换结果"))
         self.assertEqual(str(dialog.start["state"]), "normal")
         dialog.run()
         self.wait_for_worker()
@@ -254,6 +256,7 @@ class DesktopWorkflowTest(unittest.TestCase):
         dialog = ConverterDialog(self.app)
         self.assertFalse(dialog.import_pdf.get())
         dialog.add_paths([str(self.photo)])
+        dialog.output.set(str(self.folder / "转换结果"))
         dialog.run()
         self.wait_for_worker()
         self.assertEqual(len(dialog.outputs), 1)

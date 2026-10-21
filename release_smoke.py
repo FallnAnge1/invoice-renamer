@@ -50,7 +50,18 @@ def run_smoke_test(output_folder):
         root = tk.Tk()
         root.withdraw()
         app = InvoiceApp(root)
-        converter = ConverterDialog(app)
+        from app_version import VERSION
+        from app_paths import desktop_directory
+        report["version"] = VERSION
+        converter = app.open_converter()
+        assert converter.window.winfo_toplevel() == root
+        assert not converter.import_pdf.get()
+        assert Path(converter.output.get()) == desktop_directory()
+        ocr_page = app.open_image_ocr()
+        assert ocr_page.window.winfo_toplevel() == root
+        app.show_page("invoice")
+        assert app.open_converter() is converter
+        report["checks"].append("single_window_navigation_desktop_default_independent_conversion")
         root.update()
         converter.close()
         import clipboard_import

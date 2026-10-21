@@ -22,6 +22,8 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 from ocr_engine import prepare_ocr
 from ui_theme import apply_theme, FONT
+from app_paths import desktop_directory
+from app_version import VERSION
 from invoice_validation import validate_invoice, update_validation
 from rename_preview import build_rename_plan, RenamePreviewDialog, file_signature, path_key, rename_no_replace
 
@@ -202,9 +204,9 @@ def _safe_archive_path(dest_dir: str, member_name: str) -> Path:
 class InvoiceApp:
     def __init__(self, root: tk.Tk):
         self.root = root
-        self.root.title("发票与文档助手")
-        self.root.geometry("1180x820")
-        self.root.minsize(960, 700)
+        self.root.title(f"发票与文档助手 {VERSION}")
+        self.root.geometry("1280x820")
+        self.root.minsize(1100, 740)
         apply_theme(root)
 
         # 数据存储：每项为 {path, filename, buyer, date, amount, invoice_no, status}
@@ -213,6 +215,8 @@ class InvoiceApp:
         self.processing = False
         self._editor = None
         self._after_id = None
+        self.tool_pages = {}
+        self.current_page = "invoice"
         self.root.protocol("WM_DELETE_WINDOW", self.close)
         self.ui_events: queue.Queue = queue.Queue()
 
@@ -220,6 +224,7 @@ class InvoiceApp:
         self._build_table()
         self._build_statusbar()
         self._refresh_table()
+        self._update_navigation()
         self._after_id = self.root.after(50, self._drain_ui_events)
 
     # ------------------------------------------------------------------
@@ -227,24 +232,31 @@ class InvoiceApp:
     # ------------------------------------------------------------------
 
     def _build_toolbar(self):
-        header = ttk.Frame(self.root, padding=(24, 20, 24, 14))
+        header = ttk.Frame(self.root, padding=(24, 14, 24, 10))
         header.pack(fill=tk.X)
         titles = ttk.Frame(header)
         titles.pack(side=tk.LEFT)
         ttk.Label(titles, text="发票与文档助手", style="Title.TLabel").pack(anchor=tk.W)
         ttk.Label(titles, text="整理发票、转换文件、提取照片文字，在一个地方完成。",
                   style="Muted.TLabel").pack(anchor=tk.W, pady=(5, 0))
-        ttk.Label(header, text="本机处理 · 无需上传", style="Badge.TLabel").pack(side=tk.RIGHT)
+        ttk.Label(header, text=f"v{VERSION} · 本机处理", style="Badge.TLabel").pack(side=tk.RIGHT)
 
         tools = ttk.Frame(self.root, padding=(24, 0, 24, 14))
         tools.pack(fill=tk.X)
-        self.convert_button = ttk.Button(tools, text="格式转换  →", command=self.open_converter)
+        self.invoice_button = ttk.Button(tools, text="发票重命名", command=lambda: self.show_page("invoice"))
+        self.invoice_button.pack(side=tk.LEFT, padx=(0, 10))
+        self.convert_button = ttk.Button(tools, text="格式转换", command=self.open_converter)
         self.convert_button.pack(side=tk.LEFT)
-        self.image_ocr_button = ttk.Button(tools, text="图片识别文字  →", command=self.open_image_ocr)
+        self.image_ocr_button = ttk.Button(tools, text="图片识字", command=self.open_image_ocr)
         self.image_ocr_button.pack(side=tk.LEFT, padx=10)
-        ttk.Label(tools, text="图片 / PDF 互转、合并拆分与中英文提取", style="Muted.TLabel").pack(side=tk.LEFT, padx=6)
+        ttk.Label(tools, text="三个功能独立使用 · 切换保留本次内容", style="Muted.TLabel").pack(side=tk.LEFT, padx=6)
 
-        stats = ttk.Frame(self.root, padding=(24, 0, 24, 16))
+        self.workspace = ttk.Frame(self.root)
+        self.workspace.pack(fill=tk.BOTH, expand=True)
+        self.invoice_page = ttk.Frame(self.workspace)
+        self.invoice_page.pack(fill=tk.BOTH, expand=True)
+
+        stats = ttk.Frame(self.invoice_page, padding=(24, 0, 24, 16))
         self.stats_frame = stats
         stats.pack(fill=tk.X)
         self.stat_values = []
@@ -257,7 +269,7 @@ class InvoiceApp:
             value.pack(anchor=tk.W, pady=(2, 0))
             self.stat_values.append(value)
 
-        toolbar = ttk.Frame(self.root, padding=(24, 0, 24, 14))
+        toolbar = ttk.Frame(self.invoice_page, padding=(24, 0, 24, 14))
         self.import_toolbar = toolbar
         toolbar.pack(fill=tk.X)
         self.add_files_button = ttk.Button(toolbar, text="01  添加 PDF", command=self.add_files, style="Compact.TButton")
@@ -281,25 +293,52 @@ class InvoiceApp:
     def _responsive_layout(self, event):
         if event.widget is not self.root:
             return
-        if event.height < 780 and self.stats_frame.winfo_manager():
+        if event.height < 840 and self.stats_frame.winfo_manager():
             self.stats_frame.pack_forget()
-        elif event.height >= 780 and not self.stats_frame.winfo_manager():
+        elif event.height >= 840 and not self.stats_frame.winfo_manager():
             self.stats_frame.pack(fill=tk.X, before=self.import_toolbar)
 
     def open_image_ocr(self):
-        if self.processing:
-            return
-        from image_ocr_dialog import ImageOCRDialog
-        ImageOCRDialog(self)
+        return self.show_page("ocr")
 
     def open_converter(self):
+        return self.show_page("converter")
+
+    def _update_navigation(self):
+        for key, button in (("invoice", self.invoice_button), ("converter", self.convert_button),
+                            ("ocr", self.image_ocr_button)):
+            button.config(style="Primary.TButton" if key == self.current_page else "TButton",
+                          state=tk.DISABLED if self.processing else tk.NORMAL)
+
+    def show_page(self, key):
         if self.processing:
             return
-        from converter_dialog import ConverterDialog
-        ConverterDialog(self)
+        if key not in {"invoice", "converter", "ocr"}:
+            raise ValueError("Unknown page")
+        if self._editor is not None:
+            self._editor.event_generate("<FocusOut>")
+        if key != "invoice":
+            page = self.tool_pages.get(key)
+            if page is None or not page.window.winfo_exists():
+                if key == "converter":
+                    from converter_dialog import ConverterDialog
+                    page = ConverterDialog(self)
+                else:
+                    from image_ocr_dialog import ImageOCRDialog
+                    page = ImageOCRDialog(self)
+                self.tool_pages[key] = page
+        if self.current_page == "ocr" and "ocr" in self.tool_pages:
+            self.tool_pages["ocr"].store_current()
+        for child in self.workspace.winfo_children():
+            child.pack_forget()
+        target = self.invoice_page if key == "invoice" else self.tool_pages[key].window
+        target.pack(fill=tk.BOTH, expand=True)
+        self.current_page = key
+        self._update_navigation()
+        return self.tool_pages.get(key)
 
     def _build_table(self):
-        frame = ttk.Frame(self.root, padding=(24, 0, 24, 0))
+        frame = ttk.Frame(self.invoice_page, padding=(24, 0, 24, 0))
         self.table_frame = frame
         frame.pack(fill=tk.BOTH, expand=True)
         frame.columnconfigure(0, weight=1)
@@ -331,13 +370,13 @@ class InvoiceApp:
         self.tree.bind("<Button-2>" if sys.platform == "darwin" else "<Button-3>", self._on_right_click)
 
     def _build_statusbar(self):
-        bottom = ttk.Frame(self.root, padding=(24, 10, 24, 14))
+        bottom = ttk.Frame(self.invoice_page, padding=(24, 10, 24, 14))
         bottom.pack(side=tk.BOTTOM, fill=tk.X)
         self.progress = ttk.Progressbar(bottom, mode="determinate")
         self.progress.pack(fill=tk.X, pady=(0, 8))
         self.status_label = ttk.Label(bottom, text="就绪 · 先导入文件，再识别和校对。", style="Muted.TLabel", wraplength=900)
         self.status_label.pack(anchor=tk.W)
-        detail = ttk.Frame(self.root, style="Card.TFrame", padding=(18, 12))
+        detail = ttk.Frame(self.invoice_page, style="Card.TFrame", padding=(18, 12))
         detail.pack(side=tk.BOTTOM, fill=tk.X, padx=24, pady=(10, 0))
         ttk.Label(detail, text="命名预览与处理说明", style="Heading.TLabel").pack(anchor=tk.W)
         self.detail_label = ttk.Label(detail, text="选择一份发票，查看完整路径、命名预览和问题说明。",
@@ -351,11 +390,16 @@ class InvoiceApp:
         if self.processing:
             messagebox.showinfo("任务进行中", "请等待当前任务结束后关闭，避免中断文件处理。", parent=self.root)
             return
+        ocr = self.tool_pages.get("ocr")
+        if ocr is not None and ocr.window.winfo_exists() and not ocr.confirm_discard(range(len(ocr.records))):
+            self.show_page("ocr")
+            return
         if self._after_id:
             self.root.after_cancel(self._after_id)
         self.root.destroy()
 
     def _sync_actions(self):
+        self._update_navigation()
         ready = not self.processing
         has_files = bool(self.items)
         states = {
@@ -868,6 +912,7 @@ class InvoiceApp:
         target = filedialog.asksaveasfilename(
             title="导出识别结果",
             defaultextension=".csv",
+            initialdir=str(desktop_directory()),
             initialfile=default_name,
             filetypes=[("CSV 文件", "*.csv")],
         )
