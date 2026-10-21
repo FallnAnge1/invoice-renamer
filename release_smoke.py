@@ -53,6 +53,37 @@ def run_smoke_test(output_folder):
         converter = ConverterDialog(app)
         root.update()
         converter.close()
+        import clipboard_import
+        original_grab = clipboard_import.ImageGrab.grabclipboard
+        def sample_clipboard():
+            with Image.open(photos[0]) as image:
+                return image.copy()
+        try:
+            clipboard_import.ImageGrab.grabclipboard = sample_clipboard
+            pasted_converter = ConverterDialog(app)
+            pasted_converter.paste_clipboard()
+            assert len(pasted_converter.paths) == 1
+            temporary_photo = Path(pasted_converter.paths[0])
+            converted, errors = convert_files(pasted_converter.paths, "image_pdf", folder / "剪贴板转换")
+            assert not errors and len(converted) == 1
+            pasted_converter.close()
+            assert not temporary_photo.exists() and Path(converted[0]).exists()
+            pasted_ocr = ImageOCRDialog(app)
+            pasted_ocr.paste_clipboard()
+            pasted_photo = Path(pasted_ocr.path)
+            pasted_ocr.run()
+            deadline = time.monotonic() + 130
+            while pasted_ocr.busy and time.monotonic() < deadline:
+                root.update()
+                time.sleep(0.02)
+            assert not pasted_ocr.busy
+            assert "12345" in pasted_ocr.records[0]["text"]
+            pasted_ocr.saved_text = pasted_ocr.get_text()
+            pasted_ocr.close()
+            assert not pasted_photo.exists()
+            report["checks"].append("clipboard_sample_import_conversion_real_ocr_cleanup")
+        finally:
+            clipboard_import.ImageGrab.grabclipboard = original_grab
         dialog = ImageOCRDialog(app)
         dialog.add_photos([photos[0], str(broken), str(blank), photos[1]])
         dialog.run()

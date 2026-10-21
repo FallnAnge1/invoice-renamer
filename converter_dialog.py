@@ -5,6 +5,7 @@ from tkinter import filedialog, messagebox, ttk
 from tkinter.scrolledtext import ScrolledText
 
 from format_converter import IMAGE_SUFFIXES, MODES, convert_files
+from clipboard_import import ClipboardImport, is_text_input
 from ui_theme import heading, style_text, open_folder, FONT, INK, LINE
 
 
@@ -15,6 +16,7 @@ class ConverterDialog:
         self.outputs = []
         self.last_folder = None
         self.busy = False
+        self.clipboard_import = ClipboardImport()
         self.window = tk.Toplevel(app.root)
         self.window.title("格式转换 · 发票与文档助手")
         self.window.geometry("900x800")
@@ -22,6 +24,8 @@ class ConverterDialog:
         self.window.transient(app.root)
         self.window.grab_set()
         self.window.protocol("WM_DELETE_WINDOW", self.close)
+        self.window.bind("<Control-v>", self.paste_shortcut)
+        self.window.bind("<Destroy>", self.cleanup_clipboard, add="+")
         body = ttk.Frame(self.window, padding=24)
         body.pack(fill=tk.BOTH, expand=True)
         heading(body, "格式转换", "图片与 PDF 互转、合并拆分，原文件始终保留。")
@@ -69,6 +73,8 @@ class ConverterDialog:
         self.count_label.pack(side=tk.LEFT)
         self.add_button = ttk.Button(row, text="添加文件", command=self.add_files)
         self.add_button.pack(side=tk.RIGHT)
+        self.paste_button = ttk.Button(row, text="从剪贴板粘贴", command=self.paste_clipboard)
+        self.paste_button.pack(side=tk.RIGHT, padx=8)
         list_frame = ttk.Frame(body)
         list_frame.pack(fill=tk.BOTH, expand=True)
         self.files = tk.Listbox(list_frame, selectmode=tk.EXTENDED, height=5, exportselection=False,
@@ -89,10 +95,10 @@ class ConverterDialog:
         self.down_button = ttk.Button(manage, text="下移", command=lambda: self.move(1))
         self.down_button.pack(side=tk.LEFT)
         ttk.Label(manage, text="合并按列表从上到下的顺序", style="Muted.TLabel").pack(side=tk.RIGHT)
-        self.controls = [self.add_button, self.remove_button, self.up_button, self.down_button,
+        self.controls = [self.add_button, self.paste_button, self.remove_button, self.up_button, self.down_button,
                          self.output_entry, choose, self.import_check, self.start]
         self.output.trace_add("write", lambda *_args: self.update_controls())
-        self.show_result("添加文件后即可转换。同名结果自动加序号，无需手动改名。")
+        self.show_result("添加文件或粘贴截图即可转换（列表中按 Ctrl+V）。同名结果自动加序号。")
         self.update_hint()
         self.update_controls()
 
@@ -154,10 +160,16 @@ class ConverterDialog:
         self.update_controls()
 
     def add_files(self):
+        if self.busy or self.app.processing:
+            return
         images = MODES[self.mode.get()].startswith("image")
         pattern = " ".join("*" + suffix for suffix in sorted(IMAGE_SUFFIXES)) if images else "*.pdf"
         paths = filedialog.askopenfilenames(parent=self.window, title="选择要转换的文件",
                     filetypes=[("图片文件" if images else "PDF 文件", pattern)])
+        self.add_paths(paths)
+
+    def add_paths(self, paths):
+        images = MODES[self.mode.get()].startswith("image")
         added = 0
         allowed = IMAGE_SUFFIXES if images else {".pdf"}
         known = {str(Path(path).resolve()).casefold() for path in self.paths}
@@ -168,10 +180,30 @@ class ConverterDialog:
                 known.add(key)
                 added += 1
         if self.paths and not self.output.get().strip():
-            self.output.set(str(Path(self.paths[0]).parent / "转换结果"))
+            first = self.paths[0]
+            self.output.set(str(Path.home() / "图片转换结果" if self.clipboard_import.is_temporary(first)
+                                else Path(first).parent / "转换结果"))
         self.refresh()
         if paths:
             self.progress_label.config(text=f"已添加 {added} 个文件")
+
+    def paste_shortcut(self, event):
+        if not is_text_input(event.widget):
+            self.paste_clipboard()
+            return "break"
+
+    def paste_clipboard(self):
+        if self.busy or self.app.processing:
+            return
+        allowed = IMAGE_SUFFIXES if MODES[self.mode.get()].startswith("image") else {".pdf"}
+        try:
+            self.add_paths(self.clipboard_import.read(allowed))
+        except (ValueError, OSError) as error:
+            messagebox.showinfo("无法粘贴", str(error), parent=self.window)
+
+    def cleanup_clipboard(self, event):
+        if event.widget == self.window:
+            self.clipboard_import.cleanup()
 
     def remove(self):
         selected = self.files.curselection()

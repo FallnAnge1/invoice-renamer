@@ -6,6 +6,7 @@ from tkinter import filedialog, messagebox, ttk
 from tkinter.scrolledtext import ScrolledText
 
 from format_converter import IMAGE_SUFFIXES
+from clipboard_import import ClipboardImport, is_text_input
 from ocr_engine import extract_text_from_image
 from batch_ocr import new_record, merge_results, export_separate, result_text, describe_ocr_error
 from ui_theme import style_text, FONT
@@ -19,6 +20,7 @@ class ImageOCRDialog:
         self.records = []
         self.current_index = None
         self.busy = False
+        self.clipboard_import = ClipboardImport()
         self._loading = False
         self.preview_image = None
         self._preview_source = None
@@ -30,6 +32,8 @@ class ImageOCRDialog:
         self.window.transient(app.root)
         self.window.grab_set()
         self.window.protocol("WM_DELETE_WINDOW", self.close)
+        self.window.bind("<Control-v>", self.paste_shortcut)
+        self.window.bind("<Destroy>", self.cleanup_clipboard, add="+")
         body = ttk.Frame(self.window, padding=(22, 18, 22, 18))
         body.pack(fill=tk.BOTH, expand=True)
         header = ttk.Frame(body)
@@ -52,6 +56,8 @@ class ImageOCRDialog:
         toolbar.pack(fill=tk.X)
         self.choose_button = ttk.Button(toolbar, text="＋ 添加照片", command=self.choose_photo, style="Compact.TButton")
         self.choose_button.pack(side=tk.LEFT)
+        self.paste_button = ttk.Button(toolbar, text="粘贴图片", command=self.paste_clipboard, style="Compact.TButton")
+        self.paste_button.pack(side=tk.LEFT, padx=(8, 0))
         self.folder_button = ttk.Button(toolbar, text="导入文件夹", command=self.choose_folder, style="Compact.TButton")
         self.folder_button.pack(side=tk.LEFT, padx=(8, 16))
         ttk.Separator(toolbar, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=(0, 16))
@@ -115,7 +121,7 @@ class ImageOCRDialog:
         self.files.bind("<<TreeviewSelect>>", self.select_record)
         self.files.tag_configure("failed", foreground="#B35313")
         self.files.tag_configure("done", foreground="#147D59")
-        self.empty_queue = ttk.Label(self.files, text="还没有照片\n\n从上方添加照片\n或导入整个文件夹。", style="CardMuted.TLabel",
+        self.empty_queue = ttk.Label(self.files, text="还没有照片\n\n添加照片、粘贴截图\n或导入整个文件夹。\n列表中可按 Ctrl+V", style="CardMuted.TLabel",
                                      anchor=tk.CENTER, justify=tk.CENTER, wraplength=150)
 
         photo = ttk.Frame(content, style="Panel.TFrame", padding=(14, 14))
@@ -276,7 +282,7 @@ class ImageOCRDialog:
 
     def set_busy(self, busy):
         self.busy = busy
-        for button in (self.choose_button, self.folder_button):
+        for button in (self.choose_button, self.folder_button, self.paste_button):
             button.config(state=tk.DISABLED if busy else tk.NORMAL)
         self.language_box.config(state=tk.DISABLED if busy else "readonly")
         self.result.config(state=tk.DISABLED if busy or self.current_index is None else tk.NORMAL)
@@ -287,6 +293,23 @@ class ImageOCRDialog:
         paths = filedialog.askopenfilenames(parent=self.window, title="选择照片（可多选）",
             filetypes=[("图片文件", " ".join("*" + suffix for suffix in sorted(IMAGE_SUFFIXES)))])
         self.add_photos(paths)
+
+    def paste_shortcut(self, event):
+        if not is_text_input(event.widget):
+            self.paste_clipboard()
+            return "break"
+
+    def paste_clipboard(self):
+        if self.busy or self.app.processing:
+            return
+        try:
+            self.add_photos(self.clipboard_import.read())
+        except (ValueError, OSError) as error:
+            messagebox.showinfo("无法粘贴", str(error), parent=self.window)
+
+    def cleanup_clipboard(self, event):
+        if event.widget == self.window:
+            self.clipboard_import.cleanup()
 
     def choose_folder(self):
         folder = filedialog.askdirectory(parent=self.window, title="导入照片文件夹（包含子文件夹）")
