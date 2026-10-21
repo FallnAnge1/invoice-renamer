@@ -24,6 +24,7 @@ from ocr_engine import prepare_ocr
 from ui_theme import apply_theme, FONT
 from app_paths import desktop_directory
 from app_version import VERSION
+from app_branding import apply_branding, set_windows_app_id
 from invoice_validation import validate_invoice, update_validation
 from rename_preview import build_rename_plan, RenamePreviewDialog, file_signature, path_key, rename_no_replace
 
@@ -208,6 +209,7 @@ class InvoiceApp:
         self.root.geometry("1280x820")
         self.root.minsize(1100, 740)
         apply_theme(root)
+        apply_branding(root)
 
         # 数据存储：每项为 {path, filename, buyer, date, amount, invoice_no, status}
         self.items: list[dict] = []
@@ -234,6 +236,7 @@ class InvoiceApp:
     def _build_toolbar(self):
         header = ttk.Frame(self.root, padding=(24, 14, 24, 10))
         header.pack(fill=tk.X)
+        ttk.Label(header, image=self.root.brand_logo).pack(side=tk.LEFT, padx=(0, 14))
         titles = ttk.Frame(header)
         titles.pack(side=tk.LEFT)
         ttk.Label(titles, text="发票与文档助手", style="Title.TLabel").pack(anchor=tk.W)
@@ -374,8 +377,11 @@ class InvoiceApp:
         bottom.pack(side=tk.BOTTOM, fill=tk.X)
         self.progress = ttk.Progressbar(bottom, mode="determinate")
         self.progress.pack(fill=tk.X, pady=(0, 8))
-        self.status_label = ttk.Label(bottom, text="就绪 · 先导入文件，再识别和校对。", style="Muted.TLabel", wraplength=900)
-        self.status_label.pack(anchor=tk.W)
+        status_row = ttk.Frame(bottom)
+        status_row.pack(fill=tk.X)
+        ttk.Label(status_row, image=self.root.brand_small).pack(side=tk.LEFT, padx=(0, 8))
+        self.status_label = ttk.Label(status_row, text="就绪 · 先导入文件，再识别和校对。", style="Muted.TLabel", wraplength=900)
+        self.status_label.pack(side=tk.LEFT)
         detail = ttk.Frame(self.invoice_page, style="Card.TFrame", padding=(18, 12))
         detail.pack(side=tk.BOTTOM, fill=tk.X, padx=24, pady=(10, 0))
         ttk.Label(detail, text="命名预览与处理说明", style="Heading.TLabel").pack(anchor=tk.W)
@@ -999,14 +1005,8 @@ class InvoiceApp:
 
 
 def main():
+    set_windows_app_id()
     root = tk.Tk()
-
-    # Windows 任务栏图标（可选）
-    try:
-        root.iconbitmap(default="invoice.ico")
-    except Exception:
-        pass
-
     app = InvoiceApp(root)
     root.mainloop()
 

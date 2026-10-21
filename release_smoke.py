@@ -53,6 +53,9 @@ def run_smoke_test(output_folder):
         from app_version import VERSION
         from app_paths import desktop_directory
         report["version"] = VERSION
+        report["onefile"] = bool(getattr(sys, "frozen", False) and Path(sys._MEIPASS).parent != Path(sys.executable).parent)
+        assert len(root._brand_images) == 4 and root.brand_small.width() == 16
+        report["checks"].append("bundled_window_header_status_icons")
         converter = app.open_converter()
         assert converter.window.winfo_toplevel() == root
         assert not converter.import_pdf.get()

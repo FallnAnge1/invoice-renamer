@@ -34,13 +34,18 @@ jobs:
       - name: Verify packaged executable
         shell: pwsh
         run: |
-          $app = Start-Process -FilePath "release/发票识别工具/发票识别工具.exe" -ArgumentList @("--self-test", "build-assets/smoke-test") -WindowStyle Hidden -PassThru -Wait
+          $isolated = Join-Path $env:RUNNER_TEMP "invoice-single-exe-test"
+          New-Item -ItemType Directory -Path $isolated -Force | Out-Null
+          Copy-Item "release/invoice-renamer-windows.exe" (Join-Path $isolated "invoice-renamer-windows.exe")
+          $app = Start-Process -FilePath (Join-Path $isolated "invoice-renamer-windows.exe") -WorkingDirectory $isolated -ArgumentList @("--self-test", "result") -WindowStyle Hidden -PassThru -Wait
           if ($app.ExitCode -ne 0) { throw "Packaged smoke test failed" }
-          Get-Content "build-assets/smoke-test/report.json"
+          $report = Get-Content (Join-Path $isolated "result/report.json") -Raw | ConvertFrom-Json
+          if (-not $report.passed -or -not $report.onefile) { throw "Single EXE validation failed" }
+          $report | ConvertTo-Json -Depth 5
       - uses: actions/upload-artifact@v4
         with:
           name: invoice-renamer-windows
-          path: release/invoice-renamer-windows.zip*
+          path: release/*
           if-no-files-found: error
       - name: Publish a verified new version
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -53,5 +58,5 @@ jobs:
           $tag = "v$version"
           gh release view "$tag" *> $null
           if ($LASTEXITCODE -eq 0) { Write-Host "Release $tag already exists; keeping existing assets."; exit 0 }
-          gh release create "$tag" "release/invoice-renamer-windows.zip" "release/invoice-renamer-windows.zip.sha256" --target "$env:GITHUB_SHA" --title "$tag · 发票与文档助手" --notes-file RELEASE_NOTES.md --latest
+          gh release create "$tag" "release/invoice-renamer-windows.exe" "release/invoice-renamer-windows.exe.sha256" "release/THIRD_PARTY_NOTICES.md" "release/使用说明.txt" --target "$env:GITHUB_SHA" --title "$tag · 发票与文档助手（单 EXE 版）" --notes-file RELEASE_NOTES.md --latest
           if ($LASTEXITCODE -ne 0) { throw "Release publication failed" }
